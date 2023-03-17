@@ -27,7 +27,7 @@ limitations under the License.
 //
 
 #ifndef BPF_PROGS_MAX
-#define BPF_PROGS_MAX 156
+#define BPF_PROGS_MAX 256
 #endif
 
 #define BPF_MAPS_MAX 32
@@ -54,7 +54,7 @@ struct bpf_engine
 	Elf *elf;
 	GElf_Ehdr ehdr;
 
-	interesting_tp_set open_tp_set;
+	interesting_ppm_sc_set curr_sc_set;
 	uint64_t m_api_version;
 	uint64_t m_schema_version;
 };

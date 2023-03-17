@@ -16,24 +16,40 @@ limitations under the License.
 */
 
 #include "state.h"
+#include <libpman.h> // before including scap so that handle_ppm_sc_mask() is not built
 #include <scap.h>
-#include <libpman.h>
 
-int pman_enable_capture(bool *tp_set)
+int pman_enable_capture(bool *sc_set)
 {
-	if (!tp_set)
+	if (!sc_set)
 	{
+		for (int i = 0; i < PPM_SC_MAX; i++)
+		{
+			pman_mark_single_ppm_sc(i, true);
+		}
 		return pman_attach_all_programs();
 	}
 
 	int ret = 0;
 	/* Enable requested tracepoints */
+	bool tp_set[TP_VAL_MAX];
+	tp_set_from_sc_set(sc_set, tp_set);
 	for (int i = 0; i < TP_VAL_MAX && ret == 0; i++)
 	{
-		if (tp_set[i])
+		if(tp_set[i])
 		{
 			ret = pman_update_single_program(i, true);
 		}
+	}
+	if (ret != 0)
+	{
+		return ret;
+	}
+
+	/* Enable requested syscalls */
+	for (int i = 0; i < PPM_SC_MAX && ret == 0; i++)
+	{
+		pman_mark_single_ppm_sc(i, true);
 	}
 	return ret;
 }
@@ -43,6 +59,10 @@ int pman_disable_capture()
 	/* If we fail at initialization time the BPF skeleton is not initialized */
 	if(g_state.skel)
 	{
+		for (int i = 0; i < PPM_SC_MAX; i++)
+		{
+			pman_mark_single_ppm_sc(i, false);
+		}
 		return pman_detach_all_programs();
 	}
 	return 0;

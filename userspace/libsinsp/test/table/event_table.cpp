@@ -1,12 +1,6 @@
 #include <gtest/gtest.h>
 #include <sinsp.h>
-
-/* These numbers must be updated when we add new events */
-#define SYSCALL_EVENTS_NUM 342
-#define TRACEPOINT_EVENTS_NUM 6
-#define METAEVENTS_NUM 19
-#define PLUGIN_EVENTS_NUM 1
-#define UNKNOWN_EVENTS_NUM 20
+#include "../test_utils.h"
 
 /* Check if the events category is correct in our event table.
  * This test will not pass if we forget to update the event table
@@ -101,14 +95,59 @@ TEST(event_table, check_unique_events_syscall_category)
 		case EC_SCHEDULER:
 		case EC_INTERNAL:
 			break;
-		
+
 		/* If we fall here it means that some events have more than one syscall category! */
 		default:
 			goto end;
 			break;
-		}	
+		}
 	}
 
 end:
 	ASSERT_EQ(event_num, PPM_EVENT_MAX);
+}
+
+TEST(events, check_event_names)
+{
+	std::map<std::string, int> event_names_count;
+
+	for(int evt = 0; evt < PPM_EVENT_MAX; evt++)
+	{
+		if(libsinsp::events::is_old_version_event((ppm_event_code)evt))
+		{
+			continue;
+		}
+
+		event_names_count[scap_get_event_info_table()[evt].name]++;
+	}
+
+	for(const auto& evt : event_names_count)
+	{
+		/* NA occurrences should be equal to unknown events number, so more than 2 */
+		if(evt.first.compare("NA") != 0)
+		{
+			/* all events that use exit and enter events should have `evt.second == 2`
+			 * while events paired with a `NA` event should have `evt.second == 1`
+			 */
+			ASSERT_TRUE(evt.second <= 2) << "[fail] " << evt.first << " = " << evt.second << std::endl;
+		}
+	}
+}
+
+TEST(events, check_usage_of_EC_UNKNOWN_flag)
+{
+	/* Every time an event is marked with the `EC_UNKNOWN` flag we should use `NA` as its name */
+	std::string unknown_name = "NA";
+	for(int evt = 0; evt < PPM_EVENT_MAX; evt++)
+	{
+		if(unknown_name.compare(scap_get_event_info_table()[evt].name) == 0)
+		{
+			ASSERT_TRUE(libsinsp::events::is_unknown_event((ppm_event_code)evt)) << "[fail] event " << evt << " should have the EC_UNKNOWN flag";
+		}
+
+		if(libsinsp::events::is_unknown_event((ppm_event_code)evt))
+		{
+			ASSERT_TRUE(unknown_name.compare(scap_get_event_info_table()[evt].name) == 0) << "[fail] event " << evt << " should have NA as its name";
+		}
+	}
 }

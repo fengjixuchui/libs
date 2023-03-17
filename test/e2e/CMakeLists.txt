@@ -17,6 +17,11 @@ else()
     set(E2E_REPORT ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
+add_custom_target(e2e-install-deps
+	COMMAND pip3 install -r ${CMAKE_CURRENT_SOURCE_DIR}/tests/requirements.txt
+	COMMAND pip3 install ${CMAKE_CURRENT_SOURCE_DIR}/tests/commons/
+)
+
 add_custom_target(e2e-context
 	COMMAND mkdir -p ${E2E_CONTEXT}
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/libsinsp/examples/sinsp-example ${E2E_CONTEXT}
@@ -37,7 +42,7 @@ add_custom_target(e2e-containers
 	DEPENDS e2e-context
 )
 
-add_custom_target(e2e-tests
+add_custom_target(e2e-tests-container
 	COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/report
 	# Run e2e tests with the kernel module
 	COMMAND docker run --rm
@@ -48,6 +53,13 @@ add_custom_target(e2e-tests
 		-v ${E2E_REPORT}/report:/report
 		sinsp-e2e-tester:latest
 	DEPENDS e2e-containers
+)
+
+add_custom_target(e2e-tests
+	COMMAND mkdir -p ${E2E_REPORT}/report
+	# Run e2e tests with the kernel module
+	COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_tests.sh
+	DEPENDS sinsp-example driver bpf
 )
 
 # This is a list of containers run by the e2e tests, if you add a different one

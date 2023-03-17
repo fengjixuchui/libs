@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "../common/types.h"
 #include "../../driver/ppm_events_public.h"
+#include "../../driver/ppm_tp.h"
 #include "scap.h"
 #include "scap-int.h"
 #include "strlcpy.h"
@@ -29,7 +30,7 @@ static struct ppm_syscall_desc g_syscall_info_table[PPM_SC_MAX];
 
 static void load_syscall_info_table() {
 	const char *sc_names[PPM_SC_MAX] = {
-#define PPM_SC_X(name, value) #name,
+#define PPM_SC_X(name, value) [value] = #name,
 		PPM_SC_FIELDS
 #undef PPM_SC_X
 	};
@@ -37,6 +38,11 @@ static void load_syscall_info_table() {
 	int i;
 	for (i = 0; i < PPM_SC_MAX; i++)
 	{
+		if (!sc_names[i])
+		{
+			continue;
+		}
+
 		strlcpy(g_syscall_info_table[i].name, sc_names[i], PPM_MAX_NAME_LEN);
 		// tolower on name string
 		char *p = g_syscall_info_table[i].name;
@@ -44,8 +50,9 @@ static void load_syscall_info_table() {
 		{
 			*p = tolower(*p);
 		}
-		// try to load category from event_table, else EC_UNKNOWN
-		g_syscall_info_table[i].category = EC_UNKNOWN | EC_SYSCALL;
+
+		// Fallback at considering all non existing syscalls as tracepoints
+		g_syscall_info_table[i].category = EC_UNKNOWN | EC_TRACEPOINT;
 #ifdef __linux__
 		// Syscall table is only present on linux
 		int j;

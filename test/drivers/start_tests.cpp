@@ -182,8 +182,6 @@ int open_engine(int argc, char** argv)
 			 * before starting the real capture. So we attach all syscalls and
 			 * `sys_enter` and `sys_exit` tracepoints.
 			 */
-			oargs.tp_of_interest.tp[SYS_ENTER] = 1;
-			oargs.tp_of_interest.tp[SYS_EXIT] = 1;
 			for(int i = 0; i < PPM_SC_MAX; i++)
 			{
 				oargs.ppm_sc_of_interest.ppm_sc[i] = 1;

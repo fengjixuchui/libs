@@ -131,6 +131,9 @@
 #define GETSOCKOPT_E_SIZE HEADER_LEN
 #define SETSOCKOPT_E_SIZE HEADER_LEN
 #define RECVMSG_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
+#define READV_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
+#define PREADV_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint64_t) + PARAM_LEN * 2
+#define PREAD_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + sizeof(uint64_t) + PARAM_LEN * 3
 #define RECVFROM_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
 #define FCNTL_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint8_t) + PARAM_LEN * 2
 #define FCNTL_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
@@ -199,6 +202,12 @@
 #define WRITE_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
 #define GETRESGID_E_SIZE HEADER_LEN
 #define GETRESGID_X_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) * 3 + PARAM_LEN * 4
+#define BRK_E_SIZE HEADER_LEN + sizeof(uint64_t) + PARAM_LEN
+#define BRK_X_SIZE HEADER_LEN + sizeof(uint64_t) + sizeof(uint32_t) * 3 + PARAM_LEN * 4
+#define GETRLIMIT_E_SIZE HEADER_LEN + sizeof(uint8_t) + PARAM_LEN
+#define GETRLIMIT_X_SIZE HEADER_LEN + sizeof(int64_t) * 3 + PARAM_LEN * 3
+#define SEND_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
+#define RECV_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
 #define NANOSLEEP_E_SIZE HEADER_LEN + sizeof(uint64_t) + PARAM_LEN
 #define NANOSLEEP_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 

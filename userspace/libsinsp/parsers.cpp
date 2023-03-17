@@ -362,6 +362,7 @@ void sinsp_parser::process_event(sinsp_evt *evt)
 	case PPME_SOCKET_ACCEPT_5_X:
 	case PPME_SOCKET_ACCEPT4_X:
 	case PPME_SOCKET_ACCEPT4_5_X:
+	case PPME_SOCKET_ACCEPT4_6_X:
 		parse_accept_exit(evt);
 		break;
 	case PPME_SYSCALL_CLOSE_E:
@@ -1404,11 +1405,6 @@ void sinsp_parser::parse_clone_exit(sinsp_evt *evt)
 
 	if(!(tinfo->m_flags & PPM_CL_CLONE_THREAD))
 	{
-		if(m_inspector->m_is_windows)
-		{
-			tinfo->m_flags |= PPM_CL_IS_MAIN_THREAD;
-		}
-
 		//
 		// Copy the fd list
 		// XXX this is a gross oversimplification that will need to be fixed.
@@ -1443,22 +1439,7 @@ void sinsp_parser::parse_clone_exit(sinsp_evt *evt)
 		//
 		// Not a thread, copy cwd
 		//
-		if(m_inspector->m_is_windows)
-		{
-			if(ptinfo->m_tid == 0 && ptinfo->m_pid == 0)
-			{
-				parinfo = evt->get_param(6);
-				tinfo->m_cwd = parinfo->m_val;
-			}
-			else
-			{
-				tinfo->m_cwd = ptinfo->get_cwd();
-			}
-		}
-		else
-		{
-			tinfo->m_cwd = ptinfo->get_cwd();
-		}
+		tinfo->m_cwd = ptinfo->get_cwd();
 	}
 	//if((tinfo->m_flags & (PPM_CL_CLONE_FILES)))
 	//{
@@ -1981,8 +1962,7 @@ void sinsp_parser::parse_execve_exit(sinsp_evt *evt)
 												evt->m_tinfo->m_cwd.c_str(),
 												(uint32_t)evt->m_tinfo->m_cwd.size(),
 												parinfo->m_val,
-												(uint32_t)parinfo->m_len,
-												m_inspector->m_is_windows);
+												(uint32_t)parinfo->m_len);
 			}
 		}
 		else if(enter_evt->get_type() == PPME_SYSCALL_EXECVEAT_E)
@@ -2050,8 +2030,7 @@ void sinsp_parser::parse_execve_exit(sinsp_evt *evt)
 								"\0", 
 								0,
 								sdir.c_str(), 
-								(uint32_t)sdir.length(), 
-								m_inspector->m_is_windows);
+								(uint32_t)sdir.length());
 
 			}
 			/* (2)/(1) If it is relative or absolute we craft the `fullpath` as usual:
@@ -2063,8 +2042,7 @@ void sinsp_parser::parse_execve_exit(sinsp_evt *evt)
 											sdir.c_str(), 
 											(uint32_t)sdir.length(),
 											pathname, 
-											namelen, 
-											m_inspector->m_is_windows);
+											namelen);
 			}
 		}
 		evt->m_tinfo->m_exepath = fullpath;
@@ -2646,7 +2624,7 @@ void sinsp_parser::parse_open_openat_creat_exit(sinsp_evt *evt)
 	char fullpath[SCAP_MAX_PATH_SIZE];
 
 	sinsp_utils::concatenate_paths(fullpath, SCAP_MAX_PATH_SIZE, sdir.c_str(), (uint32_t)sdir.length(),
-		name, namelen, m_inspector->m_is_windows);
+		name, namelen);
 
 	if(fd >= 0)
 	{
@@ -3076,12 +3054,12 @@ void sinsp_parser::parse_connect_enter(sinsp_evt *evt){
     parinfo = evt->get_param(1);
     if(parinfo->m_len == 0)
     {
-        //
-        // No address, there's nothing we can really do with this.
-        // This happens for socket types that we don't support, so we have the assertion
-        // to make sure that this is not a type of socket that we support.
-        //
-        ASSERT(!(evt->m_fdinfo->is_unix_socket() || evt->m_fdinfo->is_ipv4_socket()));
+		//
+		// Address can be NULL:
+		// sk is a TCP fastopen active socket and
+		// TCP_FASTOPEN_CONNECT sockopt is set and
+		// we already have a valid cookie for this socket.
+		//
         return;
     }
 
@@ -3273,11 +3251,11 @@ void sinsp_parser::parse_connect_exit(sinsp_evt *evt)
 	if(parinfo->m_len == 0)
 	{
 		//
-		// No address, there's nothing we can really do with this.
-		// This happens for socket types that we don't support, so we have the assertion
-		// to make sure that this is not a type of socket that we support.
+		// Address can be NULL:
+		// sk is a TCP fastopen active socket and
+		// TCP_FASTOPEN_CONNECT sockopt is set and
+		// we already have a valid cookie for this socket.
 		//
-		ASSERT(!(evt->m_fdinfo->is_unix_socket() || evt->m_fdinfo->is_ipv4_socket()));
 		return;
 	}
 

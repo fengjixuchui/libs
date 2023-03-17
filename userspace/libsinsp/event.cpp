@@ -1725,8 +1725,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 					(char*)cwd.c_str(),
 					(uint32_t)cwd.length(),
 					payload,
-					payload_len,
-					m_inspector->m_is_windows))
+					payload_len))
 				{
 					m_resolved_paramstr_storage[0] = 0;
 				}
@@ -2771,6 +2770,7 @@ bool sinsp_evt::is_network_error() const
 		       (m_pevt->type == PPME_SOCKET_ACCEPT4_X) ||
 		       (m_pevt->type == PPME_SOCKET_ACCEPT_5_X) ||
 		       (m_pevt->type == PPME_SOCKET_ACCEPT4_5_X) ||
+		       (m_pevt->type == PPME_SOCKET_ACCEPT4_6_X) ||
 		       (m_pevt->type == PPME_SOCKET_CONNECT_X) ||
 		       (m_pevt->type == PPME_SOCKET_BIND_X);
 	}

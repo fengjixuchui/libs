@@ -133,6 +133,7 @@ FILLER_RAW(terminate_filler)
 			case PPME_SYSCALL_MOUNT_E:
 			case PPME_SYSCALL_UMOUNT_E:
 			case PPME_SYSCALL_UMOUNT_1_E:
+			case PPME_SYSCALL_UMOUNT2_E:
 			case PPME_SYSCALL_RENAME_E:
 			case PPME_SYSCALL_RENAMEAT_E:
 			case PPME_SYSCALL_RENAMEAT2_E:
@@ -216,6 +217,7 @@ FILLER_RAW(terminate_filler)
 			case PPME_SYSCALL_MOUNT_X:
 			case PPME_SYSCALL_UMOUNT_X:
 			case PPME_SYSCALL_UMOUNT_1_X:
+			case PPME_SYSCALL_UMOUNT2_X:
 			case PPME_SYSCALL_RENAME_X:
 			case PPME_SYSCALL_RENAMEAT_X:
 			case PPME_SYSCALL_RENAMEAT2_X:
@@ -495,35 +497,19 @@ FILLER(sys_write_e, true)
 
 FILLER(sys_write_x, true)
 {
-	unsigned long bufsize;
-	unsigned long val;
-	long retval;
-	int res;
-
 	/* Parameter 1: res (type: PT_ERRNO) */
-	retval = bpf_syscall_get_retval(data->ctx);
-	res = bpf_val_to_ring(data, retval);
-	if (res != PPM_SUCCESS)
-		return res;
-
-	/* If the syscall fails we are not able to collect reliable params
-	 * so we return empty ones.
-	 */
-	if(retval < 0)
-	{
-		/* Parameter 2: data (type: PT_BYTEBUF) */
-		return bpf_push_empty_param(data);
-	}
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring(data, retval);
+	CHECK_RES(res);
 
 	/* Parameter 2: data (type: PT_BYTEBUF) */
+	/* If the syscall doesn't fail we use the return value as `size`
+	 * otherwise we need to rely on the syscall parameter provided by the user.
+	 */
+	unsigned long bytes_to_read = retval > 0 ? retval : bpf_syscall_get_argument(data, 2);
+	unsigned long sent_data_pointer = bpf_syscall_get_argument(data, 1);
 	data->fd = bpf_syscall_get_argument(data, 0);
-
-	val = bpf_syscall_get_argument(data, 1);
-	bufsize = bpf_syscall_get_argument(data, 2);
-
-	res = __bpf_val_to_ring(data, val, bufsize, PT_BYTEBUF, -1, true, USER);
-
-	return res;
+	return __bpf_val_to_ring(data, sent_data_pointer, bytes_to_read, PT_BYTEBUF, -1, true, USER);
 }
 
 #define POLL_MAXFDS 16
@@ -738,6 +724,44 @@ static __always_inline int bpf_parse_readv_writev_bufs(struct filler_data *data,
 	return res;
 }
 
+FILLER(sys_readv_e, true)
+{
+	unsigned long val;
+	int32_t fd;
+	int res;
+
+	/*
+	 * fd
+	 */
+	val = bpf_syscall_get_argument(data, 0);
+	fd = (int32_t)val;
+	return bpf_val_to_ring(data, (int64_t)fd);
+}
+
+FILLER(sys_preadv_e, true)
+{
+#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
+#error Implement this
+#endif
+	unsigned long val;
+	int32_t fd;
+	int res;
+
+	/*
+	 * fd
+	 */
+	val = bpf_syscall_get_argument(data, 0);
+	fd = (int32_t)val;
+	res = bpf_val_to_ring(data, (int64_t)fd);
+	CHECK_RES(res);
+	
+	/*
+	 * pos
+	 */
+	val = bpf_syscall_get_argument(data, 3);
+	return bpf_val_to_ring(data, val);
+}
+
 FILLER(sys_readv_preadv_x, true)
 {
 	const struct iovec __user *iov;
@@ -753,14 +777,28 @@ FILLER(sys_readv_preadv_x, true)
 	if (res != PPM_SUCCESS)
 		return res;
 
-	iov = (const struct iovec __user *)bpf_syscall_get_argument(data, 1);
-	iovcnt = bpf_syscall_get_argument(data, 2);
+	/*
+	* data and size
+	*/
+	if (retval > 0)
+	{
+		iov = (const struct iovec __user *)bpf_syscall_get_argument(data, 1);
+		iovcnt = bpf_syscall_get_argument(data, 2);
 
-	res = bpf_parse_readv_writev_bufs(data,
-					  iov,
-					  iovcnt,
-					  retval,
-					  PRB_FLAG_PUSH_ALL);
+		res = bpf_parse_readv_writev_bufs(data,
+						iov,
+						iovcnt,
+						retval,
+						PRB_FLAG_PUSH_ALL);
+	}
+	else 
+	{
+		/* pushing a zero size */
+		res = bpf_val_to_ring(data, 0);
+
+		/* pushing empty data */
+		res = bpf_push_empty_param(data);
+	}
 
 	return res;
 }
@@ -1551,7 +1589,7 @@ static __always_inline int f_sys_send_e_common(struct filler_data *data, int fd)
 	/*
 	 * fd
 	 */
-	res = bpf_val_to_ring(data, fd);
+	res = bpf_val_to_ring(data, (s64)fd);
 	if (res != PPM_SUCCESS)
 		return res;
 
@@ -1637,42 +1675,19 @@ FILLER(sys_sendto_e, true)
 
 FILLER(sys_send_x, true)
 {
-	unsigned long bufsize;
-	unsigned long val;
-	long retval;
-	int res;
+	/* Parameter 1: res (type: PT_ERRNO) */
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring_type(data, retval, PT_ERRNO);
+	CHECK_RES(res);
 
-	/*
-	 * res
+	/* Parameter 2: data (type: PT_BYTEBUF) */
+	/* If the syscall doesn't fail we use the return value as `size`
+	 * otherwise we need to rely on the syscall parameter provided by the user.
 	 */
-	retval = bpf_syscall_get_retval(data->ctx);
-	res = bpf_val_to_ring_type(data, retval, PT_ERRNO);
-	if (res != PPM_SUCCESS)
-		return res;
-
-	/*
-	 * data
-	 */
-	if (retval < 0) {
-		/*
-		 * The operation failed, return an empty buffer
-		 */
-		val = 0;
-		bufsize = 0;
-	} else {
-		val = bpf_syscall_get_argument(data, 1);
-
-		/*
-		 * The return value can be lower than the value provided by the user,
-		 * and we take that into account.
-		 */
-		bufsize = retval;
-	}
-
+	unsigned long bytes_to_read = retval > 0 ? retval : bpf_syscall_get_argument(data, 2);
+	unsigned long sent_data_pointer = bpf_syscall_get_argument(data, 1);
 	data->fd = bpf_syscall_get_argument(data, 0);
-	res = __bpf_val_to_ring(data, val, bufsize, PT_BYTEBUF, -1, true, USER);
-
-	return res;
+	return __bpf_val_to_ring(data, sent_data_pointer, bytes_to_read, PT_BYTEBUF, -1, true, USER);
 }
 
 FILLER(sys_execve_e, true)
@@ -4342,34 +4357,22 @@ FILLER(sys_sendmsg_e, true)
 
 FILLER(sys_sendmsg_x, true)
 {
-	const struct iovec *iov;
-	struct user_msghdr mh;
-	unsigned long iovcnt;
-	unsigned long val;
-
 	/* Parameter 1: res (type: PT_ERRNO) */
 	long retval = bpf_syscall_get_retval(data->ctx);
 	int res = bpf_val_to_ring_type(data, retval, PT_ERRNO);
 	CHECK_RES(res);
 
-	/* If the syscall fails we are not able to collect reliable params
-	 * so we return empty ones.
-	 */
-	if(retval < 0)
+	/* Parameter 2: data (type: PT_BYTEBUF) */
+	struct user_msghdr mh = {0};
+	unsigned long msghdr_pointer = bpf_syscall_get_argument(data, 1);
+	if (bpf_probe_read_user(&mh, sizeof(mh), (void *)msghdr_pointer))
 	{
-		/* Parameter 2: data (type: PT_BYTEBUF) */
+		/* in case of NULL msghdr we return an empty param */
 		return bpf_push_empty_param(data);
 	}
 
-	/*
-	 * data
-	 */
-	val = bpf_syscall_get_argument(data, 1);
-	if (bpf_probe_read_user(&mh, sizeof(mh), (void *)val))
-		return PPM_FAILURE_INVALID_USER_MEMORY;
-
-	iov = (const struct iovec *)mh.msg_iov;
-	iovcnt = mh.msg_iovlen;
+	const struct iovec *iov = (const struct iovec *)mh.msg_iov;
+	unsigned long  iovcnt = mh.msg_iovlen;
 
 	res = bpf_parse_readv_writev_bufs(data, iov, iovcnt, retval,
 					  PRB_FLAG_PUSH_DATA | PRB_FLAG_IS_WRITE);
@@ -4741,20 +4744,37 @@ FILLER(sys_mkdir_e, true)
 	return bpf_val_to_ring(data, mode);
 }
 
-FILLER(sys_pread64_e, true)
+FILLER(sys_pread_e, true)
 {
 #ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
 #error Implement this
 #endif
-	return PPM_FAILURE_BUG;
-}
+	unsigned long val;
+	unsigned long size;
+	int res;
+	uint64_t pos64;
+	int32_t fd;
 
-FILLER(sys_preadv64_e, true)
-{
-#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
-#error Implement this
-#endif
-	return PPM_FAILURE_BUG;
+	/*
+	 * fd
+	 */
+	val = bpf_syscall_get_argument(data, 0);
+	fd = (int32_t)val;
+	res = bpf_val_to_ring(data, (int64_t)fd);
+	CHECK_RES(res);
+
+	/*
+	 * size
+	 */
+	val = bpf_syscall_get_argument(data, 2);
+	res = bpf_val_to_ring(data, val);
+	CHECK_RES(res);
+
+	/*
+	 * pos
+	 */
+	val = bpf_syscall_get_argument(data, 3);
+	return bpf_val_to_ring(data, val);
 }
 
 FILLER(sys_pwrite64_e, true)
@@ -6149,6 +6169,25 @@ FILLER(sys_dup3_x, true)
 FILLER(sys_umount_x, true)
 {
 	/* Parameter 1: ret (type: PT_FD) */
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring_type(data, retval, PT_ERRNO);
+	CHECK_RES(res);
+
+	/* Parameter 2: name (type: PT_FSPATH) */
+	unsigned long target_pointer = bpf_syscall_get_argument(data, 0);
+	return  bpf_val_to_ring(data, target_pointer);
+}
+
+FILLER(sys_umount2_e, true)
+{
+	/* Parameter 1: flags (type: PT_FLAGS32) */
+	u32 flags = (u32)bpf_syscall_get_argument(data, 1);
+	return bpf_val_to_ring(data, flags);
+}
+
+FILLER(sys_umount2_x, true)
+{
+	/* Parameter 1: res (type: PT_ERRNO) */
 	long retval = bpf_syscall_get_retval(data->ctx);
 	int res = bpf_val_to_ring_type(data, retval, PT_ERRNO);
 	CHECK_RES(res);

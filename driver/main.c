@@ -1420,7 +1420,7 @@ static ppm_event_code parse_socketcall(struct event_filler_arguments *filler_arg
 		return PPME_SOCKET_RECVMMSG_E;
 #endif
 	case SYS_ACCEPT4:
-		return PPME_SOCKET_ACCEPT4_5_E;
+		return PPME_SOCKET_ACCEPT4_6_E;
 	default:
 		ASSERT(false);
 		return PPME_GENERIC_E;
@@ -1476,6 +1476,7 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SYSCALL_MOUNT_E:
 	case PPME_SYSCALL_UMOUNT_E:
 	case PPME_SYSCALL_UMOUNT_1_E:
+	case PPME_SYSCALL_UMOUNT2_E:
 	case PPME_SYSCALL_RENAME_E:
 	case PPME_SYSCALL_RENAMEAT_E:
 	case PPME_SYSCALL_RENAMEAT2_E:
@@ -1547,6 +1548,7 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SYSCALL_MOUNT_X:
 	case PPME_SYSCALL_UMOUNT_X:
 	case PPME_SYSCALL_UMOUNT_1_X:
+	case PPME_SYSCALL_UMOUNT2_X:
 	case PPME_SYSCALL_RENAME_X:
 	case PPME_SYSCALL_RENAMEAT_X:
 	case PPME_SYSCALL_RENAMEAT2_X:

@@ -52,10 +52,11 @@ or GPL2.txt for full copies of the license.
 	FN(sys_socket_bind_x)			\
 	FN(sys_poll_e)				\
 	FN(sys_poll_x)				\
-	FN(sys_pread64_e)			\
-	FN(sys_preadv64_e)			\
+	FN(sys_pread_e)			\
 	FN(sys_writev_e)			\
 	FN(sys_pwrite64_e)			\
+	FN(sys_readv_e)				\
+	FN(sys_preadv_e)			\
 	FN(sys_readv_preadv_x)			\
 	FN(sys_writev_pwritev_x)		\
 	FN(sys_pwritev_e)			\
@@ -158,6 +159,8 @@ or GPL2.txt for full copies of the license.
 	FN(sys_signalfd_e)                 \
 	FN(sys_splice_e)				\
 	FN(sys_umount_x)				\
+	FN(sys_umount2_e)				\
+	FN(sys_umount2_x)				\
 	FN(terminate_filler)
 
 #define FILLER_ENUM_FN(x) PPM_FILLER_##x,

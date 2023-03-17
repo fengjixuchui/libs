@@ -48,7 +48,7 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SYSCALL_EXECVE_8_X] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
 	[PPME_SYSCALL_CLONE_11_E] = (ppm_sc_code[]){PPM_SC_CLONE, -1},
 	[PPME_SYSCALL_CLONE_11_X] = (ppm_sc_code[]){PPM_SC_CLONE, -1},
-	[PPME_PROCEXIT_E] = (ppm_sc_code[]){PPM_SC_UNKNOWN, -1}, // TODO PPM_SC_SCHED_PROCESS_EXIT
+	[PPME_PROCEXIT_E] = (ppm_sc_code[]){PPM_SC_SCHED_PROCESS_EXIT, -1},
 	[PPME_PROCEXIT_X] = NULL,
 	[PPME_SOCKET_SOCKET_E] = (ppm_sc_code[]){PPM_SC_SOCKET, -1},
 	[PPME_SOCKET_SOCKET_X] = (ppm_sc_code[]){PPM_SC_SOCKET, -1},
@@ -178,13 +178,13 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SYSCALL_SETRLIMIT_X] = (ppm_sc_code[]){PPM_SC_SETRLIMIT, -1},
 	[PPME_SYSCALL_PRLIMIT_E] = (ppm_sc_code[]){PPM_SC_PRLIMIT64, -1},
 	[PPME_SYSCALL_PRLIMIT_X] = (ppm_sc_code[]){PPM_SC_PRLIMIT64, -1},
-	[PPME_SCHEDSWITCH_1_E] = (ppm_sc_code[]){PPM_SC_UNKNOWN, -1}, // PPM_SC_SCHED_SWITCH
+	[PPME_SCHEDSWITCH_1_E] = (ppm_sc_code[]){PPM_SC_SCHED_SWITCH, -1},
 	[PPME_SCHEDSWITCH_1_X] = NULL,
 	[PPME_DROP_E] = NULL,
 	[PPME_DROP_X] = NULL,
 	[PPME_SYSCALL_FCNTL_E] = (ppm_sc_code[]){PPM_SC_FCNTL, PPM_SC_FCNTL64, -1},
 	[PPME_SYSCALL_FCNTL_X] = (ppm_sc_code[]){PPM_SC_FCNTL, PPM_SC_FCNTL64, -1},
-	[PPME_SCHEDSWITCH_6_E] = (ppm_sc_code[]){PPM_SC_UNKNOWN, -1}, // TODO PPM_SC_SCHED_SWITCH
+	[PPME_SCHEDSWITCH_6_E] = (ppm_sc_code[]){PPM_SC_SCHED_SWITCH, -1},
 	[PPME_SCHEDSWITCH_6_X] = NULL,
 	[PPME_SYSCALL_EXECVE_13_E] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
 	[PPME_SYSCALL_EXECVE_13_X] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
@@ -218,7 +218,7 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SYSCALL_FORK_X] = (ppm_sc_code[]){PPM_SC_FORK, -1},
 	[PPME_SYSCALL_VFORK_E] = (ppm_sc_code[]){PPM_SC_VFORK, -1},
 	[PPME_SYSCALL_VFORK_X] = (ppm_sc_code[]){PPM_SC_VFORK, -1},
-	[PPME_PROCEXIT_1_E] = (ppm_sc_code[]){PPM_SC_UNKNOWN, -1}, // TODO PPM_SC_SCHED_PROCESS_EXIT
+	[PPME_PROCEXIT_1_E] = (ppm_sc_code[]){PPM_SC_SCHED_PROCESS_EXIT, -1},
 	[PPME_PROCEXIT_1_X] = NULL,
 	[PPME_SYSCALL_SENDFILE_E] = (ppm_sc_code[]){PPM_SC_SENDFILE, PPM_SC_SENDFILE64, -1},
 	[PPME_SYSCALL_SENDFILE_X] = (ppm_sc_code[]){PPM_SC_SENDFILE, PPM_SC_SENDFILE64, -1},
@@ -264,7 +264,7 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_CONTAINER_X] = NULL,
 	[PPME_SYSCALL_EXECVE_16_E] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
 	[PPME_SYSCALL_EXECVE_16_X] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
-	[PPME_SIGNALDELIVER_E] = (ppm_sc_code[]){PPM_SC_UNKNOWN, -1}, // TODO PPM_SC_SIGNAL_DELIVER
+	[PPME_SIGNALDELIVER_E] = (ppm_sc_code[]){PPM_SC_SIGNAL_DELIVER, -1},
 	[PPME_SIGNALDELIVER_X] = NULL,
 	[PPME_PROCINFO_E] = NULL,
 	[PPME_PROCINFO_X] = NULL,
@@ -290,8 +290,8 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SYSCALL_PPOLL_X] = (ppm_sc_code[]){PPM_SC_PPOLL, -1},
 	[PPME_SYSCALL_MOUNT_E] = (ppm_sc_code[]){PPM_SC_MOUNT, -1},
 	[PPME_SYSCALL_MOUNT_X] = (ppm_sc_code[]){PPM_SC_MOUNT, -1},
-	[PPME_SYSCALL_UMOUNT_E] = (ppm_sc_code[]){PPM_SC_UMOUNT2, -1},
-	[PPME_SYSCALL_UMOUNT_X] = (ppm_sc_code[]){PPM_SC_UMOUNT2, -1},
+	[PPME_SYSCALL_UMOUNT_E] = (ppm_sc_code[]){PPM_SC_UMOUNT, -1},
+	[PPME_SYSCALL_UMOUNT_X] = (ppm_sc_code[]){PPM_SC_UMOUNT, -1},
 	[PPME_K8S_E] = NULL,
 	[PPME_K8S_X] = NULL,
 	[PPME_SYSCALL_SEMGET_E] = (ppm_sc_code[]){PPM_SC_SEMGET, -1},
@@ -322,7 +322,7 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_INFRASTRUCTURE_EVENT_X] = NULL,
 	[PPME_SYSCALL_EXECVE_18_E] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
 	[PPME_SYSCALL_EXECVE_18_X] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
-	[PPME_PAGE_FAULT_E] = (ppm_sc_code[]){PPM_SC_UNKNOWN, -1}, // TODO (ppm_sc_code[]){PPM_SC_PAGE_FAULT_USER, PPM_SC_PAGE_FAULT_KERNEL, -1},
+	[PPME_PAGE_FAULT_E] = (ppm_sc_code[]){PPM_SC_PAGE_FAULT_USER, PPM_SC_PAGE_FAULT_KERNEL, -1},
 	[PPME_PAGE_FAULT_X] = NULL,
 	[PPME_SYSCALL_EXECVE_19_E] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
 	[PPME_SYSCALL_EXECVE_19_X] = (ppm_sc_code[]){PPM_SC_EXECVE, -1},
@@ -420,6 +420,10 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SYSCALL_FCHOWNAT_X] = (ppm_sc_code[]){PPM_SC_FCHOWNAT, -1},
 	[PPME_SYSCALL_UMOUNT_1_E] = (ppm_sc_code[]){PPM_SC_UMOUNT, -1},
 	[PPME_SYSCALL_UMOUNT_1_X] = (ppm_sc_code[]){PPM_SC_UMOUNT, -1},
+	[PPME_SOCKET_ACCEPT4_6_E] = (ppm_sc_code[]){PPM_SC_ACCEPT4, -1},
+	[PPME_SOCKET_ACCEPT4_6_X] = (ppm_sc_code[]){PPM_SC_ACCEPT4, -1},
+	[PPME_SYSCALL_UMOUNT2_E] = (ppm_sc_code[]){PPM_SC_UMOUNT2, -1},
+	[PPME_SYSCALL_UMOUNT2_X] = (ppm_sc_code[]){PPM_SC_UMOUNT2, -1},
 };
 
 _Static_assert(sizeof(g_events_to_sc_map) / sizeof(*g_events_to_sc_map) == PPM_EVENT_MAX, "Missing entries in g_events_to_sc_map table.");
@@ -441,8 +445,7 @@ int scap_get_modifies_state_ppm_sc(OUT uint8_t ppm_sc_array[PPM_SC_MAX])
 	for (int event_nr = 2; event_nr < PPM_EVENT_MAX; event_nr++)
 	{
 		if (g_event_info[event_nr].flags & EF_MODIFIES_STATE &&
-		   (g_event_info[event_nr].category & EC_SYSCALL))
-		    // TODO || g_event_info[event_nr].category & EC_TRACEPOINT))
+		   (g_event_info[event_nr].category & EC_SYSCALL || g_event_info[event_nr].category & EC_TRACEPOINT))
 		{
 			events_array[event_nr] = 1;
 		}
@@ -557,3 +560,16 @@ ppm_sc_code scap_native_id_to_ppm_sc(int native_id)
 	}
 	return g_syscall_table[native_id].ppm_sc;
 }
+
+int scap_ppm_sc_to_native_id(ppm_sc_code sc_code)
+{
+	for(int syscall_nr = 0; syscall_nr < SYSCALL_TABLE_SIZE; syscall_nr++)
+	{
+		if(g_syscall_table[syscall_nr].ppm_sc == sc_code)
+		{
+			return syscall_nr;
+		}
+	}
+	return -1;
+}
+

@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ limitations under the License.
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <libpman.h>
 
 #define SCAP_HANDLE_T struct modern_bpf_engine
 #include "scap_modern_bpf.h"
+#include <libpman.h>
 #include "scap.h"
 #include "scap-int.h"
 #include "scap_procs.h"
@@ -31,36 +31,20 @@ limitations under the License.
 
 /*=============================== UTILS ===============================*/
 
-static void update_single_64bit_syscall_of_interest(int ppm_sc, bool interesting)
-{
-	for(int syscall_nr = 0; syscall_nr < SYSCALL_TABLE_SIZE; syscall_nr++)
-	{
-		if (g_syscall_table[syscall_nr].ppm_sc == ppm_sc)
-		{
-			pman_mark_single_64bit_syscall(syscall_nr, interesting);
-		}
-	}
-}
-
 /// TODO: in the next future, from `oargs` we should directly receive a table of internal syscall code, not ppm_sc.
-static int32_t populate_64bit_interesting_syscalls_table(bool* ppm_sc_array)
+static int32_t populate_64bit_interesting_syscalls_table()
 {
 	int ret = SCAP_SUCCESS;
-	if(ppm_sc_array == NULL)
-	{
-		return SCAP_FAILURE;
-	}
-
 	for(int ppm_sc = 0; ppm_sc < PPM_SC_MAX; ppm_sc++)
 	{
-		update_single_64bit_syscall_of_interest(ppm_sc, ppm_sc_array[ppm_sc]);
+		pman_mark_single_ppm_sc(ppm_sc, false);
 	}
 	return ret;
 }
 
 /*
- * Verify prerequisites for modern probes are met.
- */
+* Verify prerequisites for modern probes are met.
+*/
 static int32_t check_modern_probe_support(char* last_err)
 {
 	return pman_check_support() ? SCAP_SUCCESS : SCAP_FAILURE;
@@ -118,6 +102,22 @@ int32_t scap_modern_bpf_stop_dropping_mode()
 	return SCAP_SUCCESS;
 }
 
+static int32_t scap_modern_bpf_enable_tp(struct modern_bpf_engine* handle, ppm_tp_code tp, bool enable)
+{
+	return pman_update_single_program(tp, enable);
+}
+
+static int32_t scap_modern_bpf_enable_sc(struct modern_bpf_engine* handle, ppm_sc_code ppm_sc, bool enable)
+{
+	pman_mark_single_ppm_sc(ppm_sc, enable);
+	return 0;
+}
+
+static int32_t scap_modern_bpf_handle_ppm_sc_mask(struct scap_engine_handle engine, uint32_t op, uint32_t ppm_sc)
+{
+	struct modern_bpf_engine* handle = engine.m_handle;
+	return handle_ppm_sc_mask(handle, handle->curr_sc_set.ppm_sc, op == SCAP_PPM_SC_MASK_SET, ppm_sc, scap_modern_bpf_enable_sc, scap_modern_bpf_enable_tp);
+}
 
 static int32_t scap_modern_bpf__configure(struct scap_engine_handle engine, enum scap_setting setting, unsigned long arg1, unsigned long arg2)
 {
@@ -138,14 +138,7 @@ static int32_t scap_modern_bpf__configure(struct scap_engine_handle engine, enum
 	case SCAP_SNAPLEN:
 		pman_set_snaplen(arg1);
 	case SCAP_PPM_SC_MASK:
-		/* We use this setting just to modify the interesting syscalls. */
-		if(arg1 == SCAP_PPM_SC_MASK_SET || arg1 == SCAP_PPM_SC_MASK_UNSET)
-		{
-			update_single_64bit_syscall_of_interest(arg2, arg1 == SCAP_PPM_SC_MASK_SET);
-		}
-		return SCAP_SUCCESS;
-	case SCAP_TP_MASK:
-		return pman_update_single_program(arg2, arg1 == SCAP_TP_MASK_SET);
+		return scap_modern_bpf_handle_ppm_sc_mask(engine, arg1, arg2);
 	case SCAP_DYNAMIC_SNAPLEN:
 		/* Not supported */
 		return SCAP_SUCCESS;
@@ -171,7 +164,7 @@ static int32_t scap_modern_bpf__configure(struct scap_engine_handle engine, enum
 int32_t scap_modern_bpf__start_capture(struct scap_engine_handle engine)
 {
 	struct modern_bpf_engine* handle = engine.m_handle;
-	return pman_enable_capture(handle->open_tp_set.tp);
+	return pman_enable_capture(handle->curr_sc_set.ppm_sc);
 }
 
 int32_t scap_modern_bpf__stop_capture(struct scap_engine_handle engine)
@@ -230,8 +223,8 @@ int32_t scap_modern_bpf__init(scap_t* handle, scap_open_args* oargs)
 		return ret;
 	}
 
-	/* Store interesting Tracepoints */
-	memcpy(&engine.m_handle->open_tp_set, &oargs->tp_of_interest, sizeof(interesting_tp_set));
+	/* Store interesting sc codes */
+	memcpy(&engine.m_handle->curr_sc_set, &oargs->ppm_sc_of_interest, sizeof(interesting_ppm_sc_set));
 
 	/* Set the boot time */
 	uint64_t boot_time = 0;

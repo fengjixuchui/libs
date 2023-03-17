@@ -1273,7 +1273,7 @@ TEST(SyscallExit, socketcall_socketpairX_failure)
 	int domain = PF_LOCAL;
 	int type = SOCK_STREAM;
 	int protocol = 0;
-	int32_t* fd = NULL;
+	int32_t *fd = NULL;
 
 	unsigned long args[4] = {0};
 	args[0] = domain;
@@ -1464,10 +1464,63 @@ TEST(SyscallExit, socketcall_sendtoX_fail)
 	/*=============================== TRIGGER SYSCALL ===========================*/
 
 	int32_t mock_fd = -1;
-	char* sent_data = NULL;
+	char sent_data[DEFAULT_SNAPLEN / 2] = "some-data";
+	size_t len = DEFAULT_SNAPLEN / 2;
+	uint32_t sendto_flags = 0;
+	struct sockaddr *dest_addr = NULL;
+	socklen_t addrlen = 0;
+
+	unsigned long args[6] = {0};
+	args[0] = mock_fd;
+	args[1] = (unsigned long)sent_data;
+	args[2] = len;
+	args[3] = sendto_flags;
+	args[4] = (unsigned long)dest_addr;
+	args[5] = addrlen;
+	assert_syscall_state(SYSCALL_FAILURE, "sendto", syscall(__NR_socketcall, SYS_SENDTO, args));
+	int64_t errno_value = -errno;
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	evt_test->assert_event_presence();
+
+	if(HasFatalFailure())
+	{
+		return;
+	}
+
+	evt_test->parse_event();
+
+	evt_test->assert_header();
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	/* Parameter 1: res (type: PT_ERRNO) */
+	evt_test->assert_numeric_param(1, (int64_t)errno_value);
+
+	/* Parameter 2: data (type: PT_BYTEBUF)*/
+	evt_test->assert_bytebuf_param(2, sent_data, DEFAULT_SNAPLEN / 2);
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	evt_test->assert_num_params_pushed(2);
+}
+
+TEST(SyscallExit, socketcall_sendtoX_empty)
+{
+	auto evt_test = get_syscall_event_test(__NR_sendto, EXIT_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	int32_t mock_fd = -1;
+	char *sent_data = NULL;
 	size_t len = 0;
 	uint32_t sendto_flags = 0;
-	struct sockaddr* dest_addr = NULL;
+	struct sockaddr *dest_addr = NULL;
 	socklen_t addrlen = 0;
 
 	unsigned long args[6] = {0};
@@ -1536,7 +1589,7 @@ TEST(SyscallExit, socketcall_sendmsgX_no_snaplen)
 	struct iovec iov[2];
 	memset(&send_msg, 0, sizeof(send_msg));
 	memset(iov, 0, sizeof(iov));
-	send_msg.msg_name = (struct sockaddr*)&server_addr;
+	send_msg.msg_name = (struct sockaddr *)&server_addr;
 	send_msg.msg_namelen = sizeof(server_addr);
 	char sent_data_1[FIRST_MESSAGE_LEN] = "hey! there is a first message here.";
 	char sent_data_2[SECOND_MESSAGE_LEN] = "hey! there is a second message here.";
@@ -1609,7 +1662,7 @@ TEST(SyscallExit, socketcall_sendmsgX_snaplen)
 	struct iovec iov[3];
 	memset(&send_msg, 0, sizeof(send_msg));
 	memset(iov, 0, sizeof(iov));
-	send_msg.msg_name = (struct sockaddr*)&server_addr;
+	send_msg.msg_name = (struct sockaddr *)&server_addr;
 	send_msg.msg_namelen = sizeof(server_addr);
 	char sent_data_1[FIRST_MESSAGE_LEN] = "hey! there is a first message here.";
 	char sent_data_2[SECOND_MESSAGE_LEN] = "hey! there is a second message here.";
@@ -1675,12 +1728,141 @@ TEST(SyscallExit, socketcall_sendmsgX_fail)
 	/*=============================== TRIGGER SYSCALL ===========================*/
 
 	int32_t mock_fd = -1;
-	struct msghdr* send_msg = NULL;
+	struct msghdr send_msg = {0};
+	struct iovec iov[1] = {0};
+	memset(&send_msg, 0, sizeof(send_msg));
+	memset(iov, 0, sizeof(iov));
+	char sent_data_1[DEFAULT_SNAPLEN / 2] = "some-data";
+	iov[0].iov_base = sent_data_1;
+	iov[0].iov_len = sizeof(sent_data_1);
+	send_msg.msg_iov = iov;
+	/* here we pass a wrong `iovlen` to check the behavior */
+	send_msg.msg_iovlen = 3;
 	uint32_t sendmsg_flags = 0;
 
 	unsigned long args[3] = {0};
 	args[0] = mock_fd;
 	args[1] = (unsigned long)&send_msg;
+	args[2] = sendmsg_flags;
+	assert_syscall_state(SYSCALL_FAILURE, "sendmsg", syscall(__NR_socketcall, SYS_SENDMSG, args));
+	int64_t errno_value = -errno;
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	if(evt_test->is_modern_bpf_engine())
+	{
+		evt_test->assert_event_presence();
+	}
+	else
+	{
+		/* we need to rewrite the logic in old drivers to support this partial collection
+		 * right now we drop the entire event.
+		 */
+		evt_test->assert_event_absence();
+		GTEST_SKIP() << "[SENDMSG_X]: what we receive is correct but we need to reimplement it, see the code" << std::endl;
+	}
+
+	if(HasFatalFailure())
+	{
+		return;
+	}
+
+	evt_test->parse_event();
+
+	evt_test->assert_header();
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	/* Parameter 1: res (type: PT_ERRNO) */
+	evt_test->assert_numeric_param(1, (int64_t)errno_value);
+
+	/* Parameter 2: data (type: PT_BYTEBUF)*/
+	evt_test->assert_bytebuf_param(2, sent_data_1, DEFAULT_SNAPLEN / 2);
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	evt_test->assert_num_params_pushed(2);
+}
+
+TEST(SyscallExit, socketcall_sendmsgX_null_iovec)
+{
+	auto evt_test = get_syscall_event_test(__NR_sendmsg, EXIT_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	int32_t mock_fd = -1;
+	struct msghdr send_msg = {0};
+	memset(&send_msg, 0, sizeof(send_msg));
+	send_msg.msg_iov = NULL;
+	/* here we pass a wrong `iovlen` to check the behavior */
+	send_msg.msg_iovlen = 3;
+	uint32_t sendmsg_flags = 0;
+
+	unsigned long args[3] = {0};
+	args[0] = mock_fd;
+	args[1] = (unsigned long)&send_msg;
+	args[2] = sendmsg_flags;
+	assert_syscall_state(SYSCALL_FAILURE, "sendmsg", syscall(__NR_socketcall, SYS_SENDMSG, args));
+	int64_t errno_value = -errno;
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	if(evt_test->is_modern_bpf_engine())
+	{
+		evt_test->assert_event_presence();
+	}
+	else
+	{
+		/* we need to rewrite the logic in old drivers to support this partial collection
+		 * right now we drop the entire event.
+		 */
+		evt_test->assert_event_absence();
+		GTEST_SKIP() << "[SENDMSG_X]: what we receive is correct but we need to reimplement it, see the code" << std::endl;
+	}
+
+	if(HasFatalFailure())
+	{
+		return;
+	}
+
+	evt_test->parse_event();
+
+	evt_test->assert_header();
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	/* Parameter 1: res (type: PT_ERRNO) */
+	evt_test->assert_numeric_param(1, (int64_t)errno_value);
+
+	/* Parameter 2: data (type: PT_BYTEBUF)*/
+	evt_test->assert_empty_param(2);
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	evt_test->assert_num_params_pushed(2);
+}
+
+TEST(SyscallExit, socketcall_sendmsgX_null_msghdr)
+{
+	auto evt_test = get_syscall_event_test(__NR_sendmsg, EXIT_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	int32_t mock_fd = -1;
+	struct msghdr *send_msg = NULL;
+	uint32_t sendmsg_flags = 0;
+
+	unsigned long args[3] = {0};
+	args[0] = mock_fd;
+	args[1] = (unsigned long)send_msg;
 	args[2] = sendmsg_flags;
 	assert_syscall_state(SYSCALL_FAILURE, "sendmsg", syscall(__NR_socketcall, SYS_SENDMSG, args));
 	int64_t errno_value = -errno;
@@ -2899,6 +3081,108 @@ TEST(SyscallExit, socketcall_setsockoptX_ZERO_OPTLEN)
 	evt_test->assert_num_params_pushed(6);
 }
 
+#endif
+
+#ifdef __NR_send
+
+TEST(SyscallExit, socketcall_sendX)
+{
+	auto evt_test = get_syscall_event_test(__NR_send, EXIT_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL  ===========================*/
+
+	int32_t mock_fd = -1;
+	const unsigned data_len = DEFAULT_SNAPLEN * 2;
+	char buf[data_len] = "some-data";
+	int flags = 0;
+
+	unsigned long args[4] = {0};
+	args[0] = mock_fd;
+	args[1] = (unsigned long)buf;
+	args[2] = data_len;
+	args[3] = (unsigned long)flags;
+	assert_syscall_state(SYSCALL_FAILURE, "send", syscall(__NR_socketcall, SYS_SEND, args));
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	evt_test->assert_event_presence();
+
+	if(HasFatalFailure())
+	{
+		return;
+	}
+
+	evt_test->parse_event();
+
+	evt_test->assert_header();
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	/* Parameter 1: res (type: PT_ERRNO) */
+	evt_test->assert_numeric_param(1, (int64_t)errno_value);
+
+	/* Parameter 2: data (type: PT_BYTEBUF) */
+	evt_test->assert_bytebuf_param(2, buf, DEFAULT_SNAPLEN);
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	evt_test->assert_num_params_pushed(2);
+}
+#endif
+
+#ifdef __NR_recv
+TEST(SyscallExit, socketcall_recvX_fail)
+{
+	auto evt_test = get_syscall_event_test(__NR_recv, EXIT_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL  ===========================*/
+
+	int32_t mock_fd = -1;
+	char *mock_buf = NULL;
+	size_t mock_count = DEFAULT_SNAPLEN;
+	int flags = 0;
+
+	unsigned long args[4] = {0};
+	args[0] = mock_fd;
+	args[1] = (unsigned long)mock_buf;
+	args[2] = mock_count;
+	args[3] = (unsigned long)flags;
+	assert_syscall_state(SYSCALL_FAILURE, "recv", syscall(__NR_socketcall, SYS_RECV, args));
+	int errno_value = -errno;
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	evt_test->assert_event_presence();
+
+	if(HasFatalFailure())
+	{
+		return;
+	}
+
+	evt_test->parse_event();
+
+	evt_test->assert_header();
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	/* Parameter 1: res (type: PT_ERRNO) */
+	evt_test->assert_numeric_param(1, (int64_t)errno_value);
+
+	/* Parameter 2: data (type: PT_BYTEBUF) */
+	evt_test->assert_empty_param(2);
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	evt_test->assert_num_params_pushed(2);
+}
 #endif
 
 #endif /* __NR_socketcall */

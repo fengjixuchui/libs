@@ -440,35 +440,18 @@ int f_sys_write_x(struct event_filler_arguments *args)
 
 	/* Parameter 1: res (type: PT_ERRNO) */
 	retval = (int64_t)(long)syscall_get_return_value(current, args->regs);
-
 	res = val_to_ring(args, retval, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
-
-	/* If the syscall fails we are not able to collect reliable params
-	 * so we return empty ones.
-	 */
-	if(retval < 0)
-	{
-		/* Parameter 2: data (type: PT_BYTEBUF) */
-		res = push_empty_param(args);
-		CHECK_RES(res);
-
-		return add_sentinel(args);
-	}
+	CHECK_RES(res);
 
 	/* Parameter 2: data (type: PT_BYTEBUF) */
+	/* Get the size from userspace paramater */
 	syscall_get_arguments_deprecated(current, args->regs, 2, 1, &val);
-	bufsize = val;
+	bufsize = retval > 0 ? retval : val;
 
-	/*
-	 * Copy the buffer
-	 */
 	syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
 	args->enforce_snaplen = true;
 	res = val_to_ring(args, val, bufsize, true, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	CHECK_RES(res);
 
 	return add_sentinel(args);
 }
@@ -2411,6 +2394,7 @@ int f_sys_send_x(struct event_filler_arguments *args)
 	int res;
 	int64_t retval;
 	unsigned long bufsize;
+	unsigned long sent_data_pointer;
 
 	/*
 	 * Retrieve the FD. It will be used for dynamic snaplen calculation.
@@ -2424,42 +2408,32 @@ int f_sys_send_x(struct event_filler_arguments *args)
 
 	args->fd = (int)val;
 
-	/*
-	 * res
-	 */
+	/* Parameter 1: res (type: PT_ERRNO) */
 	retval = (int64_t)(long)syscall_get_return_value(current, args->regs);
 	res = val_to_ring(args, retval, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	CHECK_RES(res);
 
-	/*
-	 * data
+	/* If the syscall doesn't fail we use the return value as `size`
+	 * otherwise we need to rely on the syscall parameter provided by the user.
 	 */
-	if (retval < 0) {
-		/*
-		 * The operation failed, return an empty buffer
-		 */
-		val = 0;
-		bufsize = 0;
-	} else {
-		if (!args->is_socketcall)
-			syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
+	if (!args->is_socketcall)
+		syscall_get_arguments_deprecated(current, args->regs, 2, 1, &val);
 #ifndef UDIG
-		else
-			val = args->socketcall_args[1];
+	else
+		val = args->socketcall_args[2];
 #endif
+	bufsize = retval > 0 ? retval : val;
 
-		/*
-		 * The return value can be lower than the value provided by the user,
-		 * and we take that into account.
-		 */
-		bufsize = retval;
-	}
+	if (!args->is_socketcall)
+		syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
+#ifndef UDIG
+	else
+		val = args->socketcall_args[1];
+#endif
 
 	args->enforce_snaplen = true;
 	res = val_to_ring(args, val, bufsize, true, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	CHECK_RES(res);
 
 	return add_sentinel(args);
 }
@@ -2827,18 +2801,6 @@ int f_sys_sendmsg_x(struct event_filler_arguments *args)
 	res = val_to_ring(args, retval, 0, false, 0);
 	CHECK_RES(res);
 
-	/* If the syscall fails we are not able to collect reliable params
-	 * so we return empty ones.
-	 */
-	if(retval < 0)
-	{
-		/* Parameter 2: data (type: PT_BYTEBUF) */
-		res = push_empty_param(args);
-		CHECK_RES(res);
-
-		return add_sentinel(args);
-	}
-
 	/*
 	 * Retrieve the message header
 	 */
@@ -2849,14 +2811,16 @@ int f_sys_sendmsg_x(struct event_filler_arguments *args)
 		val = args->socketcall_args[1];
 #endif
 
-	/*
-	 * data
-	 */
+	/* Parameter 2: data (type: PT_BYTEBUF) */
 #ifdef CONFIG_COMPAT
 	if (!args->compat) {
 #endif
 		if (unlikely(ppm_copy_from_user(&mh, (const void __user *)val, sizeof(mh))))
-			return PPM_FAILURE_INVALID_USER_MEMORY;
+		{
+			res = val_to_ring(args, 0, 0, false, 0);
+			CHECK_RES(res);
+			return add_sentinel(args);
+		}
 
 
 		iov = (const struct iovec __user *)mh.msg_iov;
@@ -2868,7 +2832,11 @@ int f_sys_sendmsg_x(struct event_filler_arguments *args)
 #ifdef CONFIG_COMPAT
 	} else {
 		if (unlikely(ppm_copy_from_user(&compat_mh, (const void __user *)compat_ptr(val), sizeof(compat_mh))))
-			return PPM_FAILURE_INVALID_USER_MEMORY;
+		{
+			res = val_to_ring(args, 0, 0, false, 0);
+			CHECK_RES(res);
+			return add_sentinel(args);
+		}
 
 		compat_iov = (const struct compat_iovec __user *)compat_ptr(compat_mh.msg_iov);
 		iovcnt = compat_mh.msg_iovlen;
@@ -3781,21 +3749,20 @@ int f_sys_linkat_x(struct event_filler_arguments *args)
 	return add_sentinel(args);
 }
 
-#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
-int f_sys_pread64_e(struct event_filler_arguments *args)
+int f_sys_pread_e(struct event_filler_arguments *args)
 {
 	unsigned long val;
 	unsigned long size;
 	int res;
-	unsigned long pos0;
-	unsigned long pos1;
-	uint64_t pos64;
+	unsigned long pos64;
+	int32_t fd;
 
 	/*
 	 * fd
 	 */
 	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
-	res = val_to_ring(args, val, 0, false, 0);
+	fd = (int32_t)val;
+	res = val_to_ring(args, (int64_t)fd, 0, false, 0);
 	if (unlikely(res != PPM_SUCCESS))
 		return res;
 
@@ -3810,6 +3777,10 @@ int f_sys_pread64_e(struct event_filler_arguments *args)
 	/*
 	 * pos
 	 */
+#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
+{
+	unsigned long pos0;
+	unsigned long pos1;
 #if defined CONFIG_X86
 	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos0);
 	syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos1);
@@ -3821,6 +3792,10 @@ int f_sys_pread64_e(struct event_filler_arguments *args)
 #endif
 
 	pos64 = merge_64(pos1, pos0);
+}
+#else 
+	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos64);
+#endif
 
 	res = val_to_ring(args, pos64, 0, false, 0);
 	if (unlikely(res != PPM_SUCCESS))
@@ -3829,6 +3804,7 @@ int f_sys_pread64_e(struct event_filler_arguments *args)
 	return add_sentinel(args);
 }
 
+#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
 int f_sys_pwrite64_e(struct event_filler_arguments *args)
 {
 	unsigned long val;
@@ -3877,45 +3853,67 @@ int f_sys_pwrite64_e(struct event_filler_arguments *args)
 
 	return add_sentinel(args);
 }
+#endif /* CAPTURE_64BIT_ARGS_SINGLE_REGISTER */
 
-int f_sys_preadv64_e(struct event_filler_arguments *args)
+int f_sys_preadv_e(struct event_filler_arguments *args)
 {
 	unsigned long val;
 	int res;
-	unsigned long pos0;
-	unsigned long pos1;
-	uint64_t pos64;
+	int32_t fd;
+	unsigned long pos64;
 
 	/*
 	 * fd
 	 */
 	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
-	res = val_to_ring(args, val, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	fd = (int32_t)val;
+	res = val_to_ring(args, (int64_t)fd, 0, false, 0);
+	CHECK_RES(res);
 
 	/*
 	 * pos
 	 */
+#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
+	{
+		unsigned long pos0;
+		unsigned long pos1;
+		/*
+		* Note that in preadv and pwritev have NO 64-bit arguments in the
+		* syscall (despite having one in the userspace API), so no alignment
+		* requirements apply here. For an overly-detailed discussion about
+		* this, see https://lwn.net/Articles/311630/
+		*/
+		syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos0);
+		syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos1);
 
-	/*
-	 * Note that in preadv and pwritev have NO 64-bit arguments in the
-	 * syscall (despite having one in the userspace API), so no alignment
-	 * requirements apply here. For an overly-detailed discussion about
-	 * this, see https://lwn.net/Articles/311630/
-	 */
-	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos0);
-	syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos1);
-
-	pos64 = merge_64(pos1, pos0);
+		pos64 = merge_64(pos1, pos0);
+	}
+#else
+	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos64);
+#endif
 
 	res = val_to_ring(args, pos64, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	CHECK_RES(res);
 
 	return add_sentinel(args);
 }
-#endif /* CAPTURE_64BIT_ARGS_SINGLE_REGISTER */
+
+int f_sys_readv_e(struct event_filler_arguments *args)
+{
+	unsigned long val;
+	int32_t fd;
+	int res;
+
+	/*
+	 * fd
+	 */
+	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
+	fd = (int32_t)val;
+	res = val_to_ring(args, (int64_t)fd, 0, false, 0);
+	CHECK_RES(res);
+
+	return add_sentinel(args);
+}
 
 int f_sys_readv_preadv_x(struct event_filler_arguments *args)
 {
@@ -3936,24 +3934,34 @@ int f_sys_readv_preadv_x(struct event_filler_arguments *args)
 	if (unlikely(res != PPM_SUCCESS))
 		return res;
 
-	/*
-	 * data and size
-	 */
-	syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
-	syscall_get_arguments_deprecated(current, args->regs, 2, 1, &iovcnt);
-
-#ifdef CONFIG_COMPAT
-	if (unlikely(args->compat)) {
-		compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
-		res = compat_parse_readv_writev_bufs(args, compat_iov, iovcnt, retval, PRB_FLAG_PUSH_ALL);
-	} else
-#endif
+	if(retval > 0)
 	{
-		iov = (const struct iovec __user *)val;
-		res = parse_readv_writev_bufs(args, iov, iovcnt, retval, PRB_FLAG_PUSH_ALL);
+		syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
+		syscall_get_arguments_deprecated(current, args->regs, 2, 1, &iovcnt);
+
+	#ifdef CONFIG_COMPAT
+		if (unlikely(args->compat)) {
+			compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
+			res = compat_parse_readv_writev_bufs(args, compat_iov, iovcnt, retval, PRB_FLAG_PUSH_ALL);
+		} else
+	#endif
+		{
+			iov = (const struct iovec __user *)val;
+			res = parse_readv_writev_bufs(args, iov, iovcnt, retval, PRB_FLAG_PUSH_ALL);
+		}
+
+		CHECK_RES(res);
+	} 
+	else 
+	{
+		/* pushing a zero size */
+		res = val_to_ring(args, 0, 0, false, 0);
+		CHECK_RES(res);
+
+		/* pushing empty data */
+		res = val_to_ring(args, 0, 0, true, 0);
+		CHECK_RES(res);
 	}
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
 
 	return add_sentinel(args);
 }
@@ -7016,6 +7024,38 @@ int f_sys_splice_e(struct event_filler_arguments *args)
 }
 
 int f_sys_umount_x(struct event_filler_arguments *args)
+{
+	unsigned long val;
+	int res;
+	int64_t retval;
+
+	/* Parameter 1: res (type: PT_ERRNO) */
+	retval = (int64_t)syscall_get_return_value(current, args->regs);
+	res = val_to_ring(args, retval, 0, false, 0);
+	CHECK_RES(res);
+
+	/* Parameter 2: name (type: PT_FSPATH) */
+	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
+	res = val_to_ring(args, val, 0, true, 0);
+	CHECK_RES(res);
+
+	return add_sentinel(args);
+}
+
+int f_sys_umount2_e(struct event_filler_arguments *args)
+{
+	unsigned long val;
+	int res;
+
+	/* Parameter 1: flags (type: PT_FLAGS32) */
+	syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
+	res = val_to_ring(args, val, 0, true, 0);
+	CHECK_RES(res);
+
+	return add_sentinel(args);
+}
+
+int f_sys_umount2_x(struct event_filler_arguments *args)
 {
 	unsigned long val;
 	int res;
