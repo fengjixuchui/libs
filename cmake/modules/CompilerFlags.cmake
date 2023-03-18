@@ -13,6 +13,9 @@ else()
 	set(CMD_MAKE make)
 endif()
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 if(NOT MSVC)
 
 	set(FALCOSECURITY_LIBS_COMMON_FLAGS "-Wall -ggdb")
@@ -29,12 +32,15 @@ if(NOT MSVC)
 	endif()
 
 	if(BUILD_WARNINGS_AS_ERRORS)
+		set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 		set(CMAKE_SUPPRESSED_WARNINGS "-Wno-unused-parameter -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-implicit-fallthrough -Wno-format-truncation")
-		set(FALCOSECURITY_LIBS_COMMON_FLAGS "${FALCOSECURITY_LIBS_COMMON_FLAGS} -Wextra -Werror ${CMAKE_SUPPRESSED_WARNINGS}")
+		set(FALCOSECURITY_LIBS_COMMON_FLAGS "${FALCOSECURITY_LIBS_COMMON_FLAGS} -Wextra ${CMAKE_SUPPRESSED_WARNINGS}")
 	endif()
 
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${FALCOSECURITY_LIBS_COMMON_FLAGS}")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${FALCOSECURITY_LIBS_COMMON_FLAGS} -std=c++0x")
+	# we need also `-std=c++17` here beacuse `set(CMAKE_CXX_STANDARD 17)` is not enough to enforce c++17
+	# with some Cmake versions: https://github.com/falcosecurity/libs/pull/950
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${FALCOSECURITY_LIBS_COMMON_FLAGS} -std=c++17")
 
 	set(CMAKE_C_FLAGS_DEBUG "${FALCOSECURITY_LIBS_DEBUG_FLAGS}")
 	set(CMAKE_CXX_FLAGS_DEBUG "${FALCOSECURITY_LIBS_DEBUG_FLAGS}")
@@ -66,4 +72,6 @@ else() # MSVC
 
 	set(CMAKE_C_FLAGS_RELEASE "${FALCOSECURITY_LIBS_RELEASE_FLAGS}")
 	set(CMAKE_CXX_FLAGS_RELEASE "${FALCOSECURITY_LIBS_RELEASE_FLAGS}")
+
+	add_definitions(-D_HAS_STD_BYTE=0)
 endif()
