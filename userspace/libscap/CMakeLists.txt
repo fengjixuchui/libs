@@ -66,8 +66,10 @@ endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
-add_library(scap STATIC
+add_library(scap
 	${targetfiles})
+
+set_scap_target_properties(scap)
 
 if (CMAKE_SYSTEM_NAME MATCHES "SunOS")
 	target_link_libraries(scap
@@ -83,14 +85,10 @@ add_library(scap_error strerror.c)
 
 target_link_libraries(scap scap_error)
 
+set_scap_target_properties(scap_error)
+
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-    option(BUILD_LIBSCAP_EXAMPLES "Build libscap examples" ON)
-
-    if (BUILD_LIBSCAP_EXAMPLES)
-        add_subdirectory(examples/01-open)
-        add_subdirectory(examples/02-validatebuffer)
-    endif()
-
+	option(BUILD_LIBSCAP_EXAMPLES "Build libscap examples" ON)
 	include(FindMakedev)
 endif()
 
@@ -129,21 +127,25 @@ add_library(scap_event_schema
 
 target_link_libraries(scap scap_event_schema)
 
+set_scap_target_properties(scap_event_schema)
+
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 	add_library(driver_event_schema
 		../../driver/syscall_table.c
 		../../driver/fillers_table.c
 		../../driver/ppm_tp.c)
 	target_link_libraries(scap_event_schema driver_event_schema)
+	set_scap_target_properties(scap_event_schema)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-add_library(scap_engine_util
-	scap_engine_util.c
-	ringbuffer/devset.c
-	ringbuffer/ringbuffer.c)
+	add_library(scap_engine_util
+		scap_engine_util.c
+		ringbuffer/devset.c
+		ringbuffer/ringbuffer.c)
 
-target_link_libraries(scap scap_engine_util)
+	target_link_libraries(scap scap_engine_util)
+	set_scap_target_properties(scap_engine_util)
 endif()
 
 add_definitions(-DHAS_ENGINE_NOOP)
@@ -159,7 +161,11 @@ endif()
 
 add_definitions(-DHAS_ENGINE_SAVEFILE)
 add_subdirectory(engine/savefile)
-target_link_libraries(scap scap_engine_savefile)
+# The static and shared build differs here because a shared scap_engine_savefile
+# will result in circular dependencies.
+if(NOT BUILD_SHARED_LIBS)
+	target_link_libraries(scap scap_engine_savefile)
+endif()
 
 add_definitions(-DHAS_ENGINE_SOURCE_PLUGIN)
 add_subdirectory(engine/source_plugin)
@@ -198,6 +204,24 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME MATCHES "Linux
 	if (BUILD_LIBSCAP_GVISOR)
 		add_definitions(-DHAS_ENGINE_GVISOR)
 		add_subdirectory(engine/gvisor)
-		target_link_libraries(scap scap_engine_gvisor)
+		# The static and shared build differs here because a shared scap_engine_gvisor
+		# will result in circular dependencies.
+		if(BUILD_SHARED_LIBS)
+			# We can move this to the gvisor CMakeFile when we use
+			# CMake 3.13 or later.
+			# https://cmake.org/cmake/help/latest/policy/CMP0079.html
+			target_link_libraries(scap
+				${CMAKE_THREAD_LIBS_INIT}
+				${PROTOBUF_LIB}
+				${JSONCPP_LIB}
+			)
+		else()
+			target_link_libraries(scap scap_engine_gvisor)
+		endif()
 	endif()
+endif()
+
+if (BUILD_LIBSCAP_EXAMPLES)
+	add_subdirectory(examples/01-open)
+	add_subdirectory(examples/02-validatebuffer)
 endif()

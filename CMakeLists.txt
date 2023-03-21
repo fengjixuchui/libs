@@ -32,6 +32,11 @@ endif()
 
 cmake_minimum_required(VERSION 3.12)
 
+# Enable MACOSX_RPATH (and keep CMake from complaining).
+if(POLICY CMP0042)
+	cmake_policy(SET CMP0042 NEW)
+endif()
+
 project(falcosecurity-libs)
 
 option(USE_BUNDLED_DEPS "Enable bundled dependencies instead of using the system ones" ON)
@@ -40,6 +45,12 @@ option(MUSL_OPTIMIZED_BUILD "Enable if you want a musl optimized build" OFF)
 option(USE_BUNDLED_DRIVER "Use the driver/ subdirectory in the build process (only available in Linux)" ON)
 option(ENABLE_DRIVERS_TESTS "Enable driver tests (bpf, kernel module, modern bpf)" OFF)
 option(ENABLE_LIBSCAP_TESTS "Enable libscap unit tests" OFF)
+option(BUILD_SHARED_LIBS "Build libscap and libsinsp as shared libraries" OFF)
+
+if(${CMAKE_VERSION} VERSION_LESS "3.1.0" AND BUILD_SHARED_LIBS)
+	# scap_engine_savefile uses target_sources
+	message(FATAL_ERROR "Shared libraries requires CMake 3.1 or later.")
+endif()
 
 include(GNUInstallDirs)
 
@@ -81,6 +92,12 @@ option(CREATE_TEST_TARGETS "Enable make-targets for unit testing" ON)
 
 if(CREATE_TEST_TARGETS AND NOT WIN32)
 	include(gtest)
+endif()
+
+if (BUILD_SHARED_LIBS)
+	get_shared_libs_versions(FALCOSECURITY_SHARED_LIBS_VERSION FALCOSECURITY_SHARED_LIBS_SOVERSION)
+	message(STATUS "Shared library version: ${FALCOSECURITY_SHARED_LIBS_VERSION}")
+	message(STATUS "Shared library soversion: ${FALCOSECURITY_SHARED_LIBS_SOVERSION}")
 endif()
 
 include(libscap)
