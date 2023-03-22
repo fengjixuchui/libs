@@ -3491,6 +3491,27 @@ FILLER(sys_io_uring_register_x, true)
 	return bpf_val_to_ring(data, nr_args);
 }
 
+FILLER(sys_inotify_init_e, true)
+{
+	/* Parameter 1: flags (type: PT_FLAGS8) */
+	/* We have nothing to extract from the kernel here so we send `0`.
+	 * This is done to preserve the `PPME_SYSCALL_INOTIFY_INIT_E` event with 1 param.
+	 */
+	return bpf_val_to_ring(data, 0);
+}
+
+FILLER(sys_inotify_init1_x, true)
+{
+	/* Parameter 1: res (type: PT_ERRNO) */
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring(data, retval);
+	CHECK_RES(res);
+
+	/* Parameter 2: flags (type: PT_FLAGS16) */
+	s32 flags = (s32)bpf_syscall_get_argument(data, 0);
+	return bpf_val_to_ring(data, inotify_init1_flags_to_scap(flags));
+}
+
 FILLER(sys_mlock_x, true)
 {
 	unsigned long val;
@@ -3722,11 +3743,39 @@ FILLER(sys_signalfd_e, true)
 	CHECK_RES(res);
 
 	/* Parameter 2: mask (type: PT_UINT32) */
+	/* Right now we are not interested in the `sigmask`, we can populate it if we need */
 	res = bpf_val_to_ring(data, 0);
 	CHECK_RES(res);
 
 	/* Parameter 3: flags (type: PT_FLAGS8) */
+	/* The syscall `signalfd` has no flags! only `signalfd4` has the `flags` param.
+	 * For compatibility with the event definition here we send `0` as flags.
+	 */
 	return bpf_val_to_ring(data, 0);
+}
+
+FILLER(sys_signalfd4_e, true)
+{
+	/* Parameter 1: fd (type: PT_FD) */
+	s32 fd = (s32)bpf_syscall_get_argument(data, 0);
+	int res = bpf_val_to_ring(data, (s64)fd);
+	CHECK_RES(res);
+
+	/* Parameter 2: mask (type: PT_UINT32) */
+	/* Right now we are not interested in the `sigmask`, we can populate it if we need */
+	return bpf_val_to_ring(data, 0);
+}
+
+FILLER(sys_signalfd4_x, true)
+{
+	/* Parameter 1: res (type: PT_FD) */
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring(data, retval);
+	CHECK_RES(res);
+
+	/* Parameter 2: flags (type: PT_FLAGS16) */
+	s32 flags = (s32)bpf_syscall_get_argument(data, 3);
+	return bpf_val_to_ring(data, signalfd4_flags_to_scap(flags));
 }
 
 FILLER(sys_epoll_create_e, true)
@@ -4486,7 +4535,51 @@ FILLER(sys_pipe_x, true)
 	{
 		bpf_get_fd_dev_ino(pipefd[0], &dev, &ino);
 	}
+
+	/* Parameter 4: ino (type: PT_UINT64) */
 	return bpf_val_to_ring(data, ino);
+}
+
+FILLER(sys_pipe2_x, true)
+{
+	/* Parameter 1: res (type: PT_ERRNO) */
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring(data, retval);
+	CHECK_RES(res);
+
+	s32 pipefd[2] = {-1, -1};
+	/* This is a pointer to the vector with the 2 file descriptors. */
+	unsigned long fd_vector_pointer = bpf_syscall_get_argument(data, 0);
+	if(bpf_probe_read_user(pipefd, sizeof(pipefd), (void *)fd_vector_pointer))
+	{
+		pipefd[0] = -1;
+		pipefd[1] = -1;
+	}
+
+	/* Parameter 2: fd1 (type: PT_FD) */
+	res = bpf_val_to_ring(data, (s64)pipefd[0]);
+	CHECK_RES(res);
+
+	/* Parameter 3: fd2 (type: PT_FD) */
+	res = bpf_val_to_ring(data, (s64)pipefd[1]);
+	CHECK_RES(res);
+
+	unsigned long ino = 0;
+	/* Not used, we use it just to call `bpf_get_fd_dev_ino` */
+	unsigned long dev = 0;
+	/* On success, pipe returns `0` */
+	if(retval == 0)
+	{
+		bpf_get_fd_dev_ino(pipefd[0], &dev, &ino);
+	}
+
+	/* Parameter 4: ino (type: PT_UINT64) */
+	res = bpf_val_to_ring(data, ino);
+	CHECK_RES(res);
+
+	/* Parameter 5: flags (type: PT_FLAGS32) */
+	s32 flags = bpf_syscall_get_argument(data, 1);
+	return bpf_val_to_ring(data, pipe2_flags_to_scap(flags));
 }
 
 FILLER(sys_lseek_e, true)
@@ -4566,24 +4659,35 @@ FILLER(sys_llseek_e, true)
 
 FILLER(sys_eventfd_e, true)
 {
-	unsigned long val;
-	int res;
+	/* Parameter 1: initval (type: PT_UINT64) */
+	unsigned long val = bpf_syscall_get_argument(data, 0);
+	int res = bpf_val_to_ring(data, val);
+	CHECK_RES(res);
 
-	/*
-	 * initval
+	/* Parameter 2: flags (type: PT_FLAGS32) */
+	/* The syscall eventfd has no flags! only `eventfd2` has the `flags` param.
+	 * For compatibility with the event definition here we send `0` as flags.
 	 */
-	val = bpf_syscall_get_argument(data, 0);
-	res = bpf_val_to_ring(data, val);
-	if (res != PPM_SUCCESS)
-		return res;
+	return bpf_val_to_ring(data, 0);
+}
 
-	/*
-	 * flags
-	 * XXX not implemented yet
-	 */
-	res = bpf_val_to_ring(data, 0);
+FILLER(sys_eventfd2_e, true)
+{
+	/* Parameter 1: initval (type: PT_UINT64) */
+	unsigned long val = bpf_syscall_get_argument(data, 0);
+	return bpf_val_to_ring(data, val);
+}
 
-	return res;
+FILLER(sys_eventfd2_x, true)
+{
+	/* Parameter 1: res (type: PT_FD) */
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring(data, retval);
+	CHECK_RES(res);
+
+	/* Parameter 2: flags (type: PT_FLAGS16) */
+	s32 flags = bpf_syscall_get_argument(data, 1);
+	return bpf_val_to_ring(data, eventfd2_flags_to_scap(flags));
 }
 
 FILLER(sys_mount_e, true)
@@ -6195,6 +6299,42 @@ FILLER(sys_umount2_x, true)
 	/* Parameter 2: name (type: PT_FSPATH) */
 	unsigned long target_pointer = bpf_syscall_get_argument(data, 0);
 	return  bpf_val_to_ring(data, target_pointer);
+}
+
+FILLER(sys_getcwd_x, true)
+{
+	/* Parameter 1: res (type: PT_ERRNO) */
+	long retval = bpf_syscall_get_retval(data->ctx);
+	int res = bpf_val_to_ring_type(data, retval, PT_ERRNO);
+	CHECK_RES(res);
+
+	/* we get the path only in case of success, in case of failure we would read only userspace junk */
+	if(retval >= 0)
+	{
+		/* Parameter 2: path (type: PT_CHARBUF) */
+		unsigned long path_pointer = bpf_syscall_get_argument(data, 0);
+		res = bpf_val_to_ring(data, path_pointer);
+	}
+	else
+	{
+		/* Parameter 2: path (type: PT_CHARBUF) */
+		res = bpf_push_empty_param(data);
+	}
+	return res;
+}
+
+FILLER(sys_getdents_e, true)
+{
+	/* Parameter 1: fd (type: PT_FD)*/
+	s32 fd = (s32)bpf_syscall_get_argument(data, 0);
+	return bpf_val_to_ring(data, (s64)fd);
+}
+
+FILLER(sys_getdents64_e, true)
+{
+	/* Parameter 1: fd (type: PT_FD)*/
+	s32 fd = (s32)bpf_syscall_get_argument(data, 0);
+	return bpf_val_to_ring(data, (s64)fd);
 }
 
 #ifdef CAPTURE_SCHED_PROC_EXEC

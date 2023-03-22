@@ -14,6 +14,9 @@ or GPL2.txt for full copies of the license.
 	FN(sys_autofill)			\
 	FN(sys_generic)				\
 	FN(sys_empty)				\
+	FN(sys_getcwd_x)			\
+	FN(sys_getdents_e)			\
+	FN(sys_getdents64_e)			\
 	FN(sys_single)				\
 	FN(sys_single_x)			\
 	FN(sys_open_e)				\
@@ -161,6 +164,13 @@ or GPL2.txt for full copies of the license.
 	FN(sys_umount_x)				\
 	FN(sys_umount2_e)				\
 	FN(sys_umount2_x)				\
+	FN(sys_pipe2_x)                 \
+	FN(sys_inotify_init_e)          \
+	FN(sys_inotify_init1_x)          \
+	FN(sys_eventfd2_e)          \
+	FN(sys_eventfd2_x)          \
+	FN(sys_signalfd4_e)          \
+	FN(sys_signalfd4_x)          \
 	FN(terminate_filler)
 
 #define FILLER_ENUM_FN(x) PPM_FILLER_##x,

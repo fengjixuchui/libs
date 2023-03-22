@@ -1,11 +1,9 @@
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
  */
-
-/* These BPF programs are used both for `pipe` and `pipe2` syscalls. */
 
 #include <helpers/interfaces/fixed_size_event.h>
 

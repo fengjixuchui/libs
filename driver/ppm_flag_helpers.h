@@ -356,6 +356,97 @@ static __always_inline u32 io_uring_register_opcodes_to_scap(unsigned long flags
 	return flags;
 }
 
+/* Here we don't define new flags for `inotify` since under the hood it uses the open flags.
+ *
+ * `/include/uapi/linux/inotify.h` from kernel source tree.
+ *
+ *  #define IN_CLOEXEC O_CLOEXEC
+ *  #define IN_NONBLOCK O_NONBLOCK
+ */
+static __always_inline u16 inotify_init1_flags_to_scap(int32_t flags)
+{
+	u16 res = 0;
+
+	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
+	if(flags < 0)
+	{
+		return res;
+	}
+
+#ifdef O_NONBLOCK
+	if (flags & O_NONBLOCK)
+		res |= PPM_O_NONBLOCK;
+#endif
+
+#ifdef O_CLOEXEC
+	if (flags & O_CLOEXEC)
+		res |= PPM_O_CLOEXEC;
+#endif
+
+	return res;
+}
+
+/* Here we don't define new flags for `eventfd2` since under the hood it uses the open flags.
+ *
+ * `/include/linux/eventd.h` from kernel source tree.
+ *
+ *  #define EFD_SEMAPHORE (1 << 0)  <---  we don't catch this flag right now.
+ *  #define EFD_CLOEXEC O_CLOEXEC
+ *  #define EFD_NONBLOCK O_NONBLOCK
+ */
+static __always_inline u16 eventfd2_flags_to_scap(int32_t flags)
+{
+	u16 res = 0;
+
+	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
+	if(flags < 0)
+	{
+		return res;
+	}
+
+#ifdef O_NONBLOCK
+	if (flags & O_NONBLOCK)
+		res |= PPM_O_NONBLOCK;
+#endif
+
+#ifdef O_CLOEXEC
+	if (flags & O_CLOEXEC)
+		res |= PPM_O_CLOEXEC;
+#endif
+
+	return res;
+}
+
+/* Here we don't define new flags for `signalfd4` since under the hood it uses the open flags.
+ *
+ * `/include/uapi/linux/signalfd.h` from kernel source tree.
+ *
+ *  #define SFD_CLOEXEC O_CLOEXEC
+ *  #define SFD_NONBLOCK O_NONBLOCK
+ */
+static __always_inline u16 signalfd4_flags_to_scap(int32_t flags)
+{
+	u16 res = 0;
+
+	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
+	if(flags < 0)
+	{
+		return res;
+	}
+
+#ifdef O_NONBLOCK
+	if (flags & O_NONBLOCK)
+		res |= PPM_O_NONBLOCK;
+#endif
+
+#ifdef O_CLOEXEC
+	if (flags & O_CLOEXEC)
+		res |= PPM_O_CLOEXEC;
+#endif
+
+	return res;
+}
+
 static __always_inline u32 clone_flags_to_scap(unsigned long flags)
 {
 	u32 res = 0;
@@ -1906,6 +1997,31 @@ static __always_inline u32 dup3_flags_to_scap(unsigned long flags)
 #ifdef O_CLOEXEC
 	if (flags & O_CLOEXEC)
 		res |= PPM_O_CLOEXEC;
+#endif
+	return res;
+}
+
+static __always_inline u32 pipe2_flags_to_scap(int32_t flags)
+{
+	u32 res = 0;
+
+	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
+	if(flags < 0)
+	{
+		return res;
+	}
+
+#ifdef O_CLOEXEC
+	if (flags & O_CLOEXEC)
+		res |= PPM_O_CLOEXEC;
+#endif
+#ifdef O_DIRECT
+	if (flags & O_DIRECT)
+		res |= PPM_O_DIRECT;
+#endif
+#ifdef O_NONBLOCK
+	if (flags & O_NONBLOCK)
+		res |= PPM_O_NONBLOCK;
 #endif
 	return res;
 }

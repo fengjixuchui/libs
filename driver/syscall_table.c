@@ -88,11 +88,15 @@ const struct syscall_evt_pair g_syscall_table[SYSCALL_TABLE_SIZE] = {
 #ifdef __NR_pipe
 	[__NR_pipe - SYSCALL_TABLE_ID0] =                       {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_PIPE_E, PPME_SYSCALL_PIPE_X, PPM_SC_PIPE},
 #endif
-	[__NR_pipe2 - SYSCALL_TABLE_ID0] =                      {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_PIPE_E, PPME_SYSCALL_PIPE_X, PPM_SC_PIPE2},
+#ifdef __NR_pipe2
+	[__NR_pipe2 - SYSCALL_TABLE_ID0] =                      {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_PIPE2_E, PPME_SYSCALL_PIPE2_X, PPM_SC_PIPE2},
+#endif	
 #ifdef __NR_eventfd
 	[__NR_eventfd - SYSCALL_TABLE_ID0] =                    {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_EVENTFD_E, PPME_SYSCALL_EVENTFD_X, PPM_SC_EVENTFD},
 #endif
-	[__NR_eventfd2 - SYSCALL_TABLE_ID0] =                   {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_EVENTFD_E, PPME_SYSCALL_EVENTFD_X, PPM_SC_EVENTFD2},
+#ifdef __NR_eventfd2
+	[__NR_eventfd2 - SYSCALL_TABLE_ID0] =                   {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_EVENTFD2_E, PPME_SYSCALL_EVENTFD2_X, PPM_SC_EVENTFD2},
+#endif
 	[__NR_futex - SYSCALL_TABLE_ID0] =                      {UF_USED | UF_ALWAYS_DROP, PPME_SYSCALL_FUTEX_E, PPME_SYSCALL_FUTEX_X, PPM_SC_FUTEX},
 #ifdef __NR_stat
 	[__NR_stat - SYSCALL_TABLE_ID0] =                       {UF_USED | UF_ALWAYS_DROP, PPME_SYSCALL_STAT_E, PPME_SYSCALL_STAT_X, PPM_SC_STAT},
@@ -148,7 +152,9 @@ const struct syscall_evt_pair g_syscall_table[SYSCALL_TABLE_SIZE] = {
 #ifdef __NR_signalfd
 	[__NR_signalfd - SYSCALL_TABLE_ID0] =                   {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_SIGNALFD_E, PPME_SYSCALL_SIGNALFD_X, PPM_SC_SIGNALFD},
 #endif
-	[__NR_signalfd4 - SYSCALL_TABLE_ID0] =                  {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_SIGNALFD_E, PPME_SYSCALL_SIGNALFD_X, PPM_SC_SIGNALFD4},
+#ifdef __NR_signalfd4
+	[__NR_signalfd4 - SYSCALL_TABLE_ID0] =                  {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_SIGNALFD4_E, PPME_SYSCALL_SIGNALFD4_X, PPM_SC_SIGNALFD4},
+#endif
 	[__NR_kill - SYSCALL_TABLE_ID0] =                       {UF_USED, PPME_SYSCALL_KILL_E, PPME_SYSCALL_KILL_X, PPM_SC_KILL},
 	[__NR_tkill - SYSCALL_TABLE_ID0] =                      {UF_USED, PPME_SYSCALL_TKILL_E, PPME_SYSCALL_TKILL_X, PPM_SC_TKILL},
 	[__NR_tgkill - SYSCALL_TABLE_ID0] =                     {UF_USED, PPME_SYSCALL_TGKILL_E, PPME_SYSCALL_TGKILL_X, PPM_SC_TGKILL},
@@ -157,7 +163,9 @@ const struct syscall_evt_pair g_syscall_table[SYSCALL_TABLE_SIZE] = {
 #ifdef __NR_inotify_init
 	[__NR_inotify_init - SYSCALL_TABLE_ID0] =               {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_INOTIFY_INIT_E, PPME_SYSCALL_INOTIFY_INIT_X, PPM_SC_INOTIFY_INIT},
 #endif
-	[__NR_inotify_init1 - SYSCALL_TABLE_ID0] =              {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_INOTIFY_INIT_E, PPME_SYSCALL_INOTIFY_INIT_X, PPM_SC_INOTIFY_INIT1},
+#ifdef __NR_inotify_init1
+	[__NR_inotify_init1 - SYSCALL_TABLE_ID0] =              {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_INOTIFY_INIT1_E, PPME_SYSCALL_INOTIFY_INIT1_X, PPM_SC_INOTIFY_INIT1},
+#endif
 	[__NR_fchmodat - SYSCALL_TABLE_ID0] =                   {UF_USED, PPME_SYSCALL_FCHMODAT_E, PPME_SYSCALL_FCHMODAT_X, PPM_SC_FCHMODAT},
 	[__NR_fchmod - SYSCALL_TABLE_ID0] =                     {UF_USED, PPME_SYSCALL_FCHMOD_E, PPME_SYSCALL_FCHMOD_X, PPM_SC_FCHMOD},
 #ifdef __NR_getrlimit
@@ -933,12 +941,18 @@ const struct syscall_evt_pair g_syscall_ia32_table[SYSCALL_TABLE_SIZE] = {
 #ifdef __NR_ia32_vfork
 	[__NR_ia32_vfork - SYSCALL_TABLE_ID0] =                      {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_VFORK_20_E, PPME_SYSCALL_VFORK_20_X, PPM_SC_VFORK},
 #endif
+#ifdef __NR_ia32_pipe
 	[__NR_ia32_pipe - SYSCALL_TABLE_ID0] =                       {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_PIPE_E, PPME_SYSCALL_PIPE_X, PPM_SC_PIPE},
-	[__NR_ia32_pipe2 - SYSCALL_TABLE_ID0] =                      {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_PIPE_E, PPME_SYSCALL_PIPE_X, PPM_SC_PIPE2},
+#endif
+#ifdef __NR_ia32_pipe2
+	[__NR_ia32_pipe2 - SYSCALL_TABLE_ID0] =                      {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_PIPE2_E, PPME_SYSCALL_PIPE2_X, PPM_SC_PIPE2},
+#endif
 #ifdef __NR_ia32_eventfd
 	[__NR_ia32_eventfd - SYSCALL_TABLE_ID0] =                    {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_EVENTFD_E, PPME_SYSCALL_EVENTFD_X, PPM_SC_EVENTFD},
 #endif
-	[__NR_ia32_eventfd2 - SYSCALL_TABLE_ID0] =                   {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_EVENTFD_E, PPME_SYSCALL_EVENTFD_X, PPM_SC_EVENTFD2},
+#ifdef __NR_ia32_eventfd2
+	[__NR_ia32_eventfd2 - SYSCALL_TABLE_ID0] =                   {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_EVENTFD2_E, PPME_SYSCALL_EVENTFD2_X, PPM_SC_EVENTFD2},
+#endif
 	[__NR_ia32_futex - SYSCALL_TABLE_ID0] =                      {UF_USED | UF_ALWAYS_DROP, PPME_SYSCALL_FUTEX_E, PPME_SYSCALL_FUTEX_X, PPM_SC_FUTEX},
 #ifdef __NR_ia32_stat
 	[__NR_ia32_stat - SYSCALL_TABLE_ID0] =                       {UF_USED | UF_ALWAYS_DROP, PPME_SYSCALL_STAT_E, PPME_SYSCALL_STAT_X, PPM_SC_STAT},
@@ -990,7 +1004,9 @@ const struct syscall_evt_pair g_syscall_ia32_table[SYSCALL_TABLE_SIZE] = {
 #ifdef __NR_ia32_signalfd
 	[__NR_ia32_signalfd - SYSCALL_TABLE_ID0] =                   {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_SIGNALFD_E, PPME_SYSCALL_SIGNALFD_X, PPM_SC_SIGNALFD},
 #endif
-	[__NR_ia32_signalfd4 - SYSCALL_TABLE_ID0] =                  {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_SIGNALFD_E, PPME_SYSCALL_SIGNALFD_X, PPM_SC_SIGNALFD4},
+#ifdef __NR_ia32_signalfd4
+	[__NR_ia32_signalfd4 - SYSCALL_TABLE_ID0] =                  {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_SIGNALFD4_E, PPME_SYSCALL_SIGNALFD4_X, PPM_SC_SIGNALFD4},
+#endif
 	[__NR_ia32_kill - SYSCALL_TABLE_ID0] =                       {UF_USED, PPME_SYSCALL_KILL_E, PPME_SYSCALL_KILL_X, PPM_SC_KILL},
 	[__NR_ia32_tkill - SYSCALL_TABLE_ID0] =                      {UF_USED, PPME_SYSCALL_TKILL_E, PPME_SYSCALL_TKILL_X, PPM_SC_TKILL},
 	[__NR_ia32_tgkill - SYSCALL_TABLE_ID0] =                     {UF_USED, PPME_SYSCALL_TGKILL_E, PPME_SYSCALL_TGKILL_X, PPM_SC_TGKILL},
@@ -999,7 +1015,9 @@ const struct syscall_evt_pair g_syscall_ia32_table[SYSCALL_TABLE_SIZE] = {
 #ifdef __NR_ia32_inotify_init
 	[__NR_ia32_inotify_init - SYSCALL_TABLE_ID0] =               {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_INOTIFY_INIT_E, PPME_SYSCALL_INOTIFY_INIT_X, PPM_SC_INOTIFY_INIT},
 #endif
-	[__NR_ia32_inotify_init1 - SYSCALL_TABLE_ID0] =              {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_INOTIFY_INIT_E, PPME_SYSCALL_INOTIFY_INIT_X, PPM_SC_INOTIFY_INIT1},
+#ifdef __NR_ia32_inotify_init1
+	[__NR_ia32_inotify_init1 - SYSCALL_TABLE_ID0] =              {UF_USED | UF_NEVER_DROP, PPME_SYSCALL_INOTIFY_INIT1_E, PPME_SYSCALL_INOTIFY_INIT1_X, PPM_SC_INOTIFY_INIT1},
+#endif
 	[__NR_ia32_fchmodat - SYSCALL_TABLE_ID0] =                   {UF_USED, PPME_SYSCALL_FCHMODAT_E, PPME_SYSCALL_FCHMODAT_X, PPM_SC_FCHMODAT},
 	[__NR_ia32_fchmod - SYSCALL_TABLE_ID0] =                     {UF_USED, PPME_SYSCALL_FCHMOD_E, PPME_SYSCALL_FCHMOD_X, PPM_SC_FCHMOD},
 #ifdef __NR_ia32_getrlimit

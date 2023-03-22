@@ -92,10 +92,10 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SOCKET_ACCEPT4_X] = (ppm_sc_code[]){PPM_SC_ACCEPT4, -1},
 	[PPME_SYSCALL_CREAT_E] = (ppm_sc_code[]){PPM_SC_CREAT, -1},
 	[PPME_SYSCALL_CREAT_X] = (ppm_sc_code[]){PPM_SC_CREAT, -1},
-	[PPME_SYSCALL_PIPE_E] = (ppm_sc_code[]){PPM_SC_PIPE, PPM_SC_PIPE2, -1},
-	[PPME_SYSCALL_PIPE_X] = (ppm_sc_code[]){PPM_SC_PIPE, PPM_SC_PIPE2, -1},
-	[PPME_SYSCALL_EVENTFD_E] = (ppm_sc_code[]){PPM_SC_EVENTFD, PPM_SC_EVENTFD2, -1},
-	[PPME_SYSCALL_EVENTFD_X] = (ppm_sc_code[]){PPM_SC_EVENTFD, PPM_SC_EVENTFD2, -1},
+	[PPME_SYSCALL_PIPE_E] = (ppm_sc_code[]){PPM_SC_PIPE, -1},
+	[PPME_SYSCALL_PIPE_X] = (ppm_sc_code[]){PPM_SC_PIPE, -1},
+	[PPME_SYSCALL_EVENTFD_E] = (ppm_sc_code[]){PPM_SC_EVENTFD, -1},
+	[PPME_SYSCALL_EVENTFD_X] = (ppm_sc_code[]){PPM_SC_EVENTFD, -1},
 	[PPME_SYSCALL_FUTEX_E] = (ppm_sc_code[]){PPM_SC_FUTEX, -1},
 	[PPME_SYSCALL_FUTEX_X] = (ppm_sc_code[]){PPM_SC_FUTEX, -1},
 	[PPME_SYSCALL_STAT_E] = (ppm_sc_code[]){PPM_SC_STAT, -1},
@@ -158,8 +158,8 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SYSCALL_PWRITEV_X] = (ppm_sc_code[]){PPM_SC_PWRITEV, -1},
 	[PPME_SYSCALL_DUP_E] = (ppm_sc_code[]){PPM_SC_DUP, -1},
 	[PPME_SYSCALL_DUP_X] = (ppm_sc_code[]){PPM_SC_DUP, -1},
-	[PPME_SYSCALL_SIGNALFD_E] = (ppm_sc_code[]){PPM_SC_SIGNALFD, PPM_SC_SIGNALFD4, -1},
-	[PPME_SYSCALL_SIGNALFD_X] = (ppm_sc_code[]){PPM_SC_SIGNALFD, PPM_SC_SIGNALFD4, -1},
+	[PPME_SYSCALL_SIGNALFD_E] = (ppm_sc_code[]){PPM_SC_SIGNALFD, -1},
+	[PPME_SYSCALL_SIGNALFD_X] = (ppm_sc_code[]){PPM_SC_SIGNALFD, -1},
 	[PPME_SYSCALL_KILL_E] = (ppm_sc_code[]){PPM_SC_KILL, -1},
 	[PPME_SYSCALL_KILL_X] = (ppm_sc_code[]){PPM_SC_KILL, -1},
 	[PPME_SYSCALL_TKILL_E] = (ppm_sc_code[]){PPM_SC_TKILL, -1},
@@ -170,8 +170,8 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SYSCALL_NANOSLEEP_X] = (ppm_sc_code[]){PPM_SC_NANOSLEEP, -1},
 	[PPME_SYSCALL_TIMERFD_CREATE_E] = (ppm_sc_code[]){PPM_SC_TIMERFD_CREATE, -1},
 	[PPME_SYSCALL_TIMERFD_CREATE_X] = (ppm_sc_code[]){PPM_SC_TIMERFD_CREATE, -1},
-	[PPME_SYSCALL_INOTIFY_INIT_E] = (ppm_sc_code[]){PPM_SC_INOTIFY_INIT, PPM_SC_INOTIFY_INIT1, -1},
-	[PPME_SYSCALL_INOTIFY_INIT_X] = (ppm_sc_code[]){PPM_SC_INOTIFY_INIT, PPM_SC_INOTIFY_INIT1, -1},
+	[PPME_SYSCALL_INOTIFY_INIT_E] = (ppm_sc_code[]){PPM_SC_INOTIFY_INIT, -1},
+	[PPME_SYSCALL_INOTIFY_INIT_X] = (ppm_sc_code[]){PPM_SC_INOTIFY_INIT, -1},
 	[PPME_SYSCALL_GETRLIMIT_E] = (ppm_sc_code[]){PPM_SC_GETRLIMIT, PPM_SC_UGETRLIMIT, -1},
 	[PPME_SYSCALL_GETRLIMIT_X] = (ppm_sc_code[]){PPM_SC_GETRLIMIT, PPM_SC_UGETRLIMIT, -1},
 	[PPME_SYSCALL_SETRLIMIT_E] = (ppm_sc_code[]){PPM_SC_SETRLIMIT, -1},
@@ -424,6 +424,14 @@ static const ppm_sc_code *g_events_to_sc_map[] = {
 	[PPME_SOCKET_ACCEPT4_6_X] = (ppm_sc_code[]){PPM_SC_ACCEPT4, -1},
 	[PPME_SYSCALL_UMOUNT2_E] = (ppm_sc_code[]){PPM_SC_UMOUNT2, -1},
 	[PPME_SYSCALL_UMOUNT2_X] = (ppm_sc_code[]){PPM_SC_UMOUNT2, -1},
+	[PPME_SYSCALL_PIPE2_E] = (ppm_sc_code[]){PPM_SC_PIPE2, -1},
+	[PPME_SYSCALL_PIPE2_X] = (ppm_sc_code[]){PPM_SC_PIPE2, -1},
+	[PPME_SYSCALL_INOTIFY_INIT1_E] = (ppm_sc_code[]){PPM_SC_INOTIFY_INIT1, -1},
+	[PPME_SYSCALL_INOTIFY_INIT1_X] = (ppm_sc_code[]){PPM_SC_INOTIFY_INIT1, -1},
+	[PPME_SYSCALL_EVENTFD2_E] = (ppm_sc_code[]){PPM_SC_EVENTFD2, -1},
+	[PPME_SYSCALL_EVENTFD2_X] = (ppm_sc_code[]){PPM_SC_EVENTFD2, -1},
+	[PPME_SYSCALL_SIGNALFD4_E] = (ppm_sc_code[]){PPM_SC_SIGNALFD4, -1},
+	[PPME_SYSCALL_SIGNALFD4_X] = (ppm_sc_code[]){PPM_SC_SIGNALFD4, -1},
 };
 
 _Static_assert(sizeof(g_events_to_sc_map) / sizeof(*g_events_to_sc_map) == PPM_EVENT_MAX, "Missing entries in g_events_to_sc_map table.");
@@ -561,6 +569,9 @@ ppm_sc_code scap_native_id_to_ppm_sc(int native_id)
 	return g_syscall_table[native_id].ppm_sc;
 }
 
+/* Here we must be sure that there is a 1:1 relation between syscall_id:ppm_sc 
+ * otherwise there is the risk to return only the first occurrence
+ */
 int scap_ppm_sc_to_native_id(ppm_sc_code sc_code)
 {
 	for(int syscall_nr = 0; syscall_nr < SYSCALL_TABLE_SIZE; syscall_nr++)
@@ -572,4 +583,3 @@ int scap_ppm_sc_to_native_id(ppm_sc_code sc_code)
 	}
 	return -1;
 }
-

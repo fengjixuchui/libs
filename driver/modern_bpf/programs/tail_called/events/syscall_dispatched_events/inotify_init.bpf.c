@@ -1,13 +1,11 @@
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
  */
 
 #include <helpers/interfaces/fixed_size_event.h>
-
-/* These BPF programs are used for `inotify_init` and `inotify_init1` syscalls. */
 
 /*=============================== ENTER EVENT ===========================*/
 
@@ -27,10 +25,9 @@ int BPF_PROG(inotify_init_e,
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: flags (type: PT_FLAGS8) */
-	/// TODO: please note `int inotify_init(void)` has not a first parameter only
-	/// `inotify_init1` as a flag parameter...To avoid information leakage taking
-	/// the value of first register even when we are not allowed, we default this
-	/// parameter to `0`... we could generate 2 new events to manage this situation.
+	/* We have nothing to extract from the kernel here so we send `0`.
+	 * This is done to preserve the `PPME_SYSCALL_INOTIFY_INIT_E` event with 1 param.
+	 */
 	u8 flags = 0;
 	ringbuf__store_u8(&ringbuf, flags);
 

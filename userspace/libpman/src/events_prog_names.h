@@ -24,6 +24,18 @@ limitations under the License.
 static const char* event_prog_names[PPM_EVENT_MAX] = {
 	[PPME_GENERIC_E] = "generic_e",
 	[PPME_GENERIC_X] = "generic_x",
+	[PPME_SYSCALL_GETCWD_E] = "getcwd_e",
+	[PPME_SYSCALL_GETCWD_X] = "getcwd_x",
+	[PPME_SYSCALL_GETDENTS_E] = "getdents_e",
+	[PPME_SYSCALL_GETDENTS_X] = "getdents_x",
+	[PPME_SYSCALL_GETDENTS64_E] = "getdents64_e",
+	[PPME_SYSCALL_GETDENTS64_X] = "getdents64_x",
+	[PPME_SYSCALL_EPOLLWAIT_E] = "epoll_wait_e",
+	[PPME_SYSCALL_EPOLLWAIT_X] = "epoll_wait_x",
+	[PPME_SOCKET_GETPEERNAME_E] = "getpeername_e",
+	[PPME_SOCKET_GETPEERNAME_X] = "getpeername_x",
+	[PPME_SOCKET_GETSOCKNAME_E] = "getsockname_e",
+	[PPME_SOCKET_GETSOCKNAME_X] = "getsockname_x",
 	[PPME_SYSCALL_MKDIR_2_E] = "mkdir_e",
 	[PPME_SYSCALL_MKDIR_2_X] = "mkdir_x",
 	[PPME_SYSCALL_MMAP_E] = "mmap_e",
@@ -280,6 +292,14 @@ static const char* event_prog_names[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_UMOUNT_1_X] = "umount_x",
 	[PPME_SOCKET_ACCEPT4_6_E] = "accept4_e",
 	[PPME_SOCKET_ACCEPT4_6_X] = "accept4_x",
+	[PPME_SYSCALL_PIPE2_E] = "pipe2_e",
+	[PPME_SYSCALL_PIPE2_X] = "pipe2_x",
+	[PPME_SYSCALL_INOTIFY_INIT1_E] = "inotify_init1_e",
+	[PPME_SYSCALL_INOTIFY_INIT1_X] = "inotify_init1_x",
+	[PPME_SYSCALL_EVENTFD2_E] = "eventfd2_e",
+	[PPME_SYSCALL_EVENTFD2_X] = "eventfd2_x",
+	[PPME_SYSCALL_SIGNALFD4_E] = "signalfd4_e",
+	[PPME_SYSCALL_SIGNALFD4_X] = "signalfd4_x",
 };
 
 /* Some events can require more than one bpf program to collect all the data. */

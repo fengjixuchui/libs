@@ -1,13 +1,11 @@
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
  */
 
 #include <helpers/interfaces/fixed_size_event.h>
-
-/* These BPF programs are used for `eventfd` and `eventfd2` syscalls. */
 
 /*=============================== ENTER EVENT ===========================*/
 
@@ -31,9 +29,10 @@ int BPF_PROG(eventfd_e,
 	ringbuf__store_u64(&ringbuf, (u64)initval);
 
 	/* Parameter 2: flags (type: PT_FLAGS32) */
-	/// TODO: Right now we don't catch any flag.
-	u32 flags = 0;
-	ringbuf__store_u32(&ringbuf, flags);
+	/* The syscall eventfd has no flags! only `eventfd2` has the `flags` param.
+	 * For compatibility with the event definition here we send `0` as flags.
+	 */
+	ringbuf__store_u32(&ringbuf, 0);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

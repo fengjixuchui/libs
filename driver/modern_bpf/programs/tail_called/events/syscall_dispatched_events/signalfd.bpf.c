@@ -1,13 +1,11 @@
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
  */
 
 #include <helpers/interfaces/fixed_size_event.h>
-
-/* These BPF programs are used for `signalfd` and `signalfd4` syscalls. */
 
 /*=============================== ENTER EVENT ===========================*/
 
@@ -31,15 +29,13 @@ int BPF_PROG(signalfd_e,
 	ringbuf__store_s64(&ringbuf, (s64)fd);
 
 	/* Parameter 2: mask (type: PT_UINT32) */
-	/* Like in the old probe we send `0`. */
+	/* Right now we are not interested in the `sigmask`, we can populate it if we need */
 	ringbuf__store_u32(&ringbuf, 0);
 
 	/* Parameter 3: flags (type: PT_FLAGS8) */
-	/// TODO: this are not flags, but it is a sizemask,
-	/// please see here for more deatails:
-	/// https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/fs/signalfd.c#n302
-	/// We need to create 2 separate events for `signalfd` and `signalfd4`.
-	/* Like in the old probe we send `0`. */
+	/* The syscall `signalfd` has no flags! only `signalfd4` has the `flags` param.
+	 * For compatibility with the event definition here we send `0` as flags.
+	 */
 	ringbuf__store_u8(&ringbuf, 0);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

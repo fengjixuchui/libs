@@ -239,6 +239,7 @@ void sinsp_parser::process_event(sinsp_evt *evt)
 	case PPME_SYSCALL_OPENAT2_E:
 	case PPME_SOCKET_SOCKET_E:
 	case PPME_SYSCALL_EVENTFD_E:
+	case PPME_SYSCALL_EVENTFD2_E:
 	case PPME_SYSCALL_CHDIR_E:
 	case PPME_SYSCALL_FCHDIR_E:
 	case PPME_SOCKET_SHUTDOWN_E:
@@ -343,6 +344,7 @@ void sinsp_parser::process_event(sinsp_evt *evt)
 		parse_thread_exit(evt);
 		break;
 	case PPME_SYSCALL_PIPE_X:
+	case PPME_SYSCALL_PIPE2_X:
 		parse_pipe_exit(evt);
 		break;
 
@@ -377,7 +379,8 @@ void sinsp_parser::process_event(sinsp_evt *evt)
 	case PPME_SYSCALL_FCNTL_X:
 		parse_fcntl_exit(evt);
 		break;
-	case PPME_SYSCALL_EVENTFD_X :
+	case PPME_SYSCALL_EVENTFD_X:
+	case PPME_SYSCALL_EVENTFD2_X:
 		parse_eventfd_exit(evt);
 		break;
 	case PPME_SYSCALL_CHDIR_X:
@@ -399,12 +402,14 @@ void sinsp_parser::process_event(sinsp_evt *evt)
 		parse_dup_exit(evt);
 		break;
 	case PPME_SYSCALL_SIGNALFD_X:
+	case PPME_SYSCALL_SIGNALFD4_X:
 		parse_single_param_fd_exit(evt, SCAP_FD_SIGNALFD);
 		break;
 	case PPME_SYSCALL_TIMERFD_CREATE_X:
 		parse_single_param_fd_exit(evt, SCAP_FD_TIMERFD);
 		break;
 	case PPME_SYSCALL_INOTIFY_INIT_X:
+	case PPME_SYSCALL_INOTIFY_INIT1_X:
 		parse_single_param_fd_exit(evt, SCAP_FD_INOTIFY);
 		break;
 	case PPME_SYSCALL_BPF_2_X:
@@ -3529,10 +3534,8 @@ void sinsp_parser::parse_close_exit(sinsp_evt *evt)
 	}
 }
 
-void sinsp_parser::add_pipe(sinsp_evt *evt, int64_t tid, int64_t fd, uint64_t ino)
+void sinsp_parser::add_pipe(sinsp_evt *evt, int64_t fd, uint64_t ino, uint32_t openflags)
 {
-	sinsp_fdinfo_t fdi;
-
 	//
 	// lookup the thread info
 	//
@@ -3544,9 +3547,10 @@ void sinsp_parser::add_pipe(sinsp_evt *evt, int64_t tid, int64_t fd, uint64_t in
 	//
 	// Populate the new fdi
 	//
+	sinsp_fdinfo_t fdi = {};
 	fdi.m_type = SCAP_FD_FIFO;
-	fdi.m_name = "";
 	fdi.m_ino = ino;
+	fdi.m_openflags = openflags;
 
 	//
 	// Add the fd to the table.
@@ -3610,6 +3614,7 @@ void sinsp_parser::parse_pipe_exit(sinsp_evt *evt)
 	int64_t fd1, fd2;
 	int64_t retval;
 	uint64_t ino;
+	uint32_t openflags = 0;
 
 	parinfo = evt->get_param(0);
 	retval = *(int64_t *)parinfo->m_val;
@@ -3635,8 +3640,15 @@ void sinsp_parser::parse_pipe_exit(sinsp_evt *evt)
 	ASSERT(parinfo->m_len == sizeof(uint64_t));
 	ino = *(uint64_t *)parinfo->m_val;
 
-	add_pipe(evt, evt->get_tid(), fd1, ino);
-	add_pipe(evt, evt->get_tid(), fd2, ino);
+	if(evt->get_type() == PPME_SYSCALL_PIPE2_X)
+	{
+		parinfo = evt->get_param(4);
+		ASSERT(parinfo->m_len == sizeof(uint32_t));
+		openflags = *(uint32_t *)parinfo->m_val;
+	}
+
+	add_pipe(evt, fd1, ino, openflags);
+	add_pipe(evt, fd2, ino, openflags);
 }
 
 
@@ -4398,12 +4410,11 @@ void sinsp_parser::parse_eventfd_exit(sinsp_evt *evt)
 {
 	sinsp_evt_param *parinfo;
 	int64_t fd;
-	sinsp_fdinfo_t fdi;
 
 	//
 	// lookup the thread info
 	//
-	if(!evt->m_tinfo)
+	if(evt->m_tinfo == nullptr)
 	{
 		ASSERT(false);
 		return;
@@ -4424,8 +4435,15 @@ void sinsp_parser::parse_eventfd_exit(sinsp_evt *evt)
 	//
 	// Populate the new fdi
 	//
+	sinsp_fdinfo_t fdi = {};
 	fdi.m_type = SCAP_FD_EVENT;
-	fdi.m_name = "";
+
+	if(evt->get_type() == PPME_SYSCALL_EVENTFD2_X)
+	{
+		parinfo = evt->get_param(1);
+		ASSERT(parinfo->m_len == sizeof(uint16_t));
+		fdi.m_openflags = *(uint16_t *)parinfo->m_val;
+	}
 
 	//
 	// Add the fd to the table.
@@ -4713,21 +4731,36 @@ void sinsp_parser::parse_single_param_fd_exit(sinsp_evt* evt, scap_fd_type type)
 	//
 	// Check if the syscall was successful
 	//
-	if(retval >= 0)
+	if(retval < 0)
 	{
-		sinsp_fdinfo_t fdi;
-
-		//
-		// Populate the new fdi
-		//
-		fdi.m_type = type;
-		fdi.m_name = "";
-
-		//
-		// Add the fd to the table.
-		//
-		evt->m_fdinfo = evt->m_tinfo->add_fd(retval, &fdi);
+		return;
 	}
+
+	sinsp_fdinfo_t fdi = {};
+
+	//
+	// Populate the new fdi
+	//
+	fdi.m_type = type;
+
+	if(evt->get_type() == PPME_SYSCALL_INOTIFY_INIT1_X)
+	{
+		parinfo = evt->get_param(1);
+		ASSERT(parinfo->m_len == sizeof(uint16_t));
+		fdi.m_openflags = *(uint16_t *)parinfo->m_val;
+	}
+
+	if(evt->get_type() == PPME_SYSCALL_SIGNALFD4_X)
+	{
+		parinfo = evt->get_param(1);
+		ASSERT(parinfo->m_len == sizeof(uint16_t));
+		fdi.m_openflags = *(uint16_t *)parinfo->m_val;
+	}
+
+	//
+	// Add the fd to the table.
+	//
+	evt->m_fdinfo = evt->m_tinfo->add_fd(retval, &fdi);
 }
 
 void sinsp_parser::parse_getrlimit_setrlimit_exit(sinsp_evt *evt)
