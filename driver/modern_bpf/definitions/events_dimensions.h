@@ -144,7 +144,7 @@
 #define RECVMSG_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define READV_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define PREADV_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint64_t) + PARAM_LEN * 2
-#define PREAD_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + sizeof(uint64_t) + PARAM_LEN * 3
+#define PREAD64_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + sizeof(uint64_t) + PARAM_LEN * 3
 #define RECVFROM_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
 #define FCNTL_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint8_t) + PARAM_LEN * 2
 #define FCNTL_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
@@ -206,11 +206,17 @@
 #define FUTEX_E_SIZE HEADER_LEN + sizeof(uint64_t) * 2 + sizeof(uint16_t) + PARAM_LEN * 3
 #define FUTEX_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define STAT_E_SIZE HEADER_LEN
+#define LSTAT_E_SIZE HEADER_LEN
+#define FSTAT_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
+#define FSTAT_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define LSEEK_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint64_t) + sizeof(uint8_t) + 3 * PARAM_LEN 
 #define LSEEK_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define LLSEEK_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint64_t) + sizeof(uint8_t) + 3 * PARAM_LEN 
 #define LLSEEK_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define WRITE_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
+#define WRITEV_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
+#define PWRITEV_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + sizeof(uint64_t) + PARAM_LEN * 3
+#define PWRITE64_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + sizeof(uint64_t) + PARAM_LEN * 3
 #define GETRESGID_E_SIZE HEADER_LEN
 #define GETRESGID_X_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) * 3 + PARAM_LEN * 4
 #define BRK_E_SIZE HEADER_LEN + sizeof(uint64_t) + PARAM_LEN

@@ -185,6 +185,21 @@ int f_sys_single_x(struct event_filler_arguments *args)
 	return add_sentinel(args);
 }
 
+int f_sys_fstat_e(struct event_filler_arguments *args)
+{
+	int res = 0;
+	unsigned long val = 0;
+	s32 fd = 0;
+
+	/* Parameter 1: fd (type: PT_FD) */
+	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
+	fd = (s32)val;
+	res = val_to_ring(args, (s64)fd, 0, false, 0);
+	CHECK_RES(res);
+
+	return add_sentinel(args);
+}
+
 static inline void get_fd_dev_ino(int64_t fd, uint32_t* dev, uint64_t* ino)
 {
 #ifdef UDIG
@@ -2394,7 +2409,6 @@ int f_sys_send_x(struct event_filler_arguments *args)
 	int res;
 	int64_t retval;
 	unsigned long bufsize;
-	unsigned long sent_data_pointer;
 
 	/*
 	 * Retrieve the FD. It will be used for dynamic snaplen calculation.
@@ -3838,7 +3852,7 @@ int f_sys_linkat_x(struct event_filler_arguments *args)
 	return add_sentinel(args);
 }
 
-int f_sys_pread_e(struct event_filler_arguments *args)
+int f_sys_pread64_e(struct event_filler_arguments *args)
 {
 	unsigned long val;
 	unsigned long size;
@@ -3893,56 +3907,54 @@ int f_sys_pread_e(struct event_filler_arguments *args)
 	return add_sentinel(args);
 }
 
-#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
 int f_sys_pwrite64_e(struct event_filler_arguments *args)
 {
 	unsigned long val;
 	unsigned long size;
 	int res;
-	unsigned long pos0;
-	unsigned long pos1;
-	uint64_t pos64;
+	unsigned long pos64;
+	s32 fd = 0;
 
 	/*
 	 * fd
 	 */
 	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
-	res = val_to_ring(args, val, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	fd = (s32)val;
+	res = val_to_ring(args, (s64)fd, 0, false, 0);
+	CHECK_RES(res);
 
 	/*
 	 * size
 	 */
 	syscall_get_arguments_deprecated(current, args->regs, 2, 1, &size);
 	res = val_to_ring(args, size, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	CHECK_RES(res);
 
-	/*
-	 * pos
-	 * NOTE: this is a 64bit value, which means that on 32bit systems it uses two
-	 * separate registers that we need to merge.
-	 */
+	/* Parameter 3: pos (type: PT_UINT64) */
+#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
+	{
+		unsigned long pos0 = 0;
+		unsigned long pos1 = 0;
 #if defined CONFIG_X86
-	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos0);
-	syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos1);
+		syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos0);
+		syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos1);
 #elif defined CONFIG_ARM && CONFIG_AEABI
-	syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos0);
-	syscall_get_arguments_deprecated(current, args->regs, 5, 1, &pos1);
+		syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos0);
+		syscall_get_arguments_deprecated(current, args->regs, 5, 1, &pos1);
 #else
-  #error This architecture/abi not yet supported
+  		#error This architecture/abi not yet supported
 #endif
-
-	pos64 = merge_64(pos1, pos0);
+		pos64 = merge_64(pos1, pos0);
+	}
+#else
+	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos64);
+#endif /* CAPTURE_64BIT_ARGS_SINGLE_REGISTER*/
 
 	res = val_to_ring(args, pos64, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	CHECK_RES(res);
 
 	return add_sentinel(args);
 }
-#endif /* CAPTURE_64BIT_ARGS_SINGLE_REGISTER */
 
 int f_sys_preadv_e(struct event_filler_arguments *args)
 {
@@ -4009,10 +4021,6 @@ int f_sys_readv_preadv_x(struct event_filler_arguments *args)
 	unsigned long val;
 	int64_t retval;
 	int res;
-#ifdef CONFIG_COMPAT
-	const struct compat_iovec __user *compat_iov;
-#endif
-	const struct iovec __user *iov;
 	unsigned long iovcnt;
 
 	/*
@@ -4030,12 +4038,12 @@ int f_sys_readv_preadv_x(struct event_filler_arguments *args)
 
 	#ifdef CONFIG_COMPAT
 		if (unlikely(args->compat)) {
-			compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
+			const struct compat_iovec __user *compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
 			res = compat_parse_readv_writev_bufs(args, compat_iov, iovcnt, retval, PRB_FLAG_PUSH_ALL);
 		} else
 	#endif
 		{
-			iov = (const struct iovec __user *)val;
+			const struct iovec __user *iov = (const struct iovec __user *)val;
 			res = parse_readv_writev_bufs(args, iov, iovcnt, retval, PRB_FLAG_PUSH_ALL);
 		}
 
@@ -4048,7 +4056,7 @@ int f_sys_readv_preadv_x(struct event_filler_arguments *args)
 		CHECK_RES(res);
 
 		/* pushing empty data */
-		res = val_to_ring(args, 0, 0, true, 0);
+		res = push_empty_param(args);
 		CHECK_RES(res);
 	}
 
@@ -4059,23 +4067,16 @@ int f_sys_writev_e(struct event_filler_arguments *args)
 {
 	unsigned long val;
 	int res;
-#ifdef CONFIG_COMPAT
-	const struct compat_iovec __user *compat_iov;
-#endif
-	const struct iovec __user *iov;
+	s32 fd = 0;
 	unsigned long iovcnt;
 
-	/*
-	 * fd
-	 */
+	/* Parameter 1: fd (type: PT_FD) */
 	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
-	res = val_to_ring(args, val, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	fd = (s32)val;
+	res = val_to_ring(args, (s64)fd, 0, false, 0);
+	CHECK_RES(res);
 
-	/*
-	 * size
-	 */
+	/* Parameter 2: size (type: PT_UINT32) */
 	syscall_get_arguments_deprecated(current, args->regs, 2, 1, &iovcnt);
 
 	/*
@@ -4084,20 +4085,27 @@ int f_sys_writev_e(struct event_filler_arguments *args)
 	syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
 #ifdef CONFIG_COMPAT
 	if (unlikely(args->compat)) {
-		compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
+		const struct compat_iovec __user *compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
 		res = compat_parse_readv_writev_bufs(args, compat_iov, iovcnt,
 											args->consumer->snaplen,
 											PRB_FLAG_PUSH_SIZE | PRB_FLAG_IS_WRITE);
 	} else
 #endif
 	{
-		iov = (const struct iovec __user *)val;
+		const struct iovec __user *iov = (const struct iovec __user *)val;
 		res = parse_readv_writev_bufs(args, iov, iovcnt, args->consumer->snaplen,
 									  PRB_FLAG_PUSH_SIZE | PRB_FLAG_IS_WRITE);
 	}
 
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	/* if there was an error we send a size equal to `0`.
+	 * we can improve this in the future but at least we don't lose the whole event.
+	 */
+	if(res == PPM_FAILURE_INVALID_USER_MEMORY)
+	{
+		res = val_to_ring(args, 0, 0, true, 0);
+	}
+
+	CHECK_RES(res);
 
 	return add_sentinel(args);
 }
@@ -4107,10 +4115,6 @@ int f_sys_writev_pwritev_x(struct event_filler_arguments *args)
 	unsigned long val;
 	int res;
 	int64_t retval;
-#ifdef CONFIG_COMPAT
-	const struct compat_iovec __user *compat_iov;
-#endif
-	const struct iovec __user *iov;
 	unsigned long iovcnt;
 
 	/*
@@ -4133,16 +4137,24 @@ int f_sys_writev_pwritev_x(struct event_filler_arguments *args)
 	syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
 #ifdef CONFIG_COMPAT
 	if (unlikely(args->compat)) {
-		compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
+		const struct compat_iovec __user *compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
 		res = compat_parse_readv_writev_bufs(args, compat_iov, iovcnt, args->consumer->snaplen, PRB_FLAG_PUSH_DATA | PRB_FLAG_IS_WRITE);
 	} else
 #endif
 	{
-		iov = (const struct iovec __user *)val;
+		const struct iovec __user *iov = (const struct iovec __user *)val;
 		res = parse_readv_writev_bufs(args, iov, iovcnt, args->consumer->snaplen, PRB_FLAG_PUSH_DATA | PRB_FLAG_IS_WRITE);
 	}
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+
+	/* if there was an error we send an empty param.
+	 * we can improve this in the future but at least we don't lose the whole event.
+	 */
+	if(res == PPM_FAILURE_INVALID_USER_MEMORY)
+	{
+		res = push_empty_param(args);
+	}
+
+	CHECK_RES(res);
 
 	return add_sentinel(args);
 }
@@ -4151,24 +4163,17 @@ int f_sys_pwritev_e(struct event_filler_arguments *args)
 {
 	unsigned long val;
 	int res;
-#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
-	unsigned long pos0;
-	unsigned long pos1;
-	uint64_t pos64;
-#endif
-#ifdef CONFIG_COMPAT
-	const struct compat_iovec __user *compat_iov;
-#endif
-	const struct iovec __user *iov;
+	unsigned long pos64;
+	s32 fd = 0;
 	unsigned long iovcnt;
 
 	/*
 	 * fd
 	 */
 	syscall_get_arguments_deprecated(current, args->regs, 0, 1, &val);
-	res = val_to_ring(args, val, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	fd = (s32)val;
+	res = val_to_ring(args, (s64)fd, 0, false, 0);
+	CHECK_RES(res);
 
 	/*
 	 * size
@@ -4180,47 +4185,52 @@ int f_sys_pwritev_e(struct event_filler_arguments *args)
 	 */
 	syscall_get_arguments_deprecated(current, args->regs, 1, 1, &val);
 #ifdef CONFIG_COMPAT
-	if (unlikely(args->compat)) {
-		compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
+	if (unlikely(args->compat))
+	{
+		const struct compat_iovec __user *compat_iov = (const struct compat_iovec __user *)compat_ptr(val);
 		res = compat_parse_readv_writev_bufs(args, compat_iov, iovcnt,
 									args->consumer->snaplen,
 									PRB_FLAG_PUSH_SIZE | PRB_FLAG_IS_WRITE);
 	} else
 #endif
 	{
-		iov = (const struct iovec __user *)val;
+		const struct iovec __user *iov = (const struct iovec __user *)val;
 		res = parse_readv_writev_bufs(args, iov, iovcnt, args->consumer->snaplen,
 									  PRB_FLAG_PUSH_SIZE | PRB_FLAG_IS_WRITE);
 	}
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
 
-	/*
-	 * pos
-	 * NOTE: this is a 64bit value, which means that on 32bit systems it uses two
-	 * separate registers that we need to merge.
+	/* if there was an error we send a size equal to 0.
+	 * we can improve this in the future but at least we don't lose the whole event.
 	 */
-#ifdef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
-	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &val);
-	res = val_to_ring(args, val, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
+	if(res == PPM_FAILURE_INVALID_USER_MEMORY)
+	{
+		res = val_to_ring(args, 0, 0, true, 0);
+	}
+
+	CHECK_RES(res);
+
+	/* Parameter 3: pos (type: PT_UINT64) */
+#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
+	{
+		unsigned long pos0 = 0;
+		unsigned long pos1 = 0;
+		/*
+		* Note that in preadv and pwritev have NO 64-bit arguments in the
+		* syscall (despite having one in the userspace API), so no alignment
+		* requirements apply here. For an overly-detailed discussion about
+		* this, see https://lwn.net/Articles/311630/
+		*/
+		syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos0);
+		syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos1);
+
+		pos64 = merge_64(pos1, pos0);
+	}
 #else
-	/*
-	 * Note that in preadv and pwritev have NO 64-bit arguments in the
-	 * syscall (despite having one in the userspace API), so no alignment
-	 * requirements apply here. For an overly-detailed discussion about
-	 * this, see https://lwn.net/Articles/311630/
-	 */
-	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos0);
-	syscall_get_arguments_deprecated(current, args->regs, 4, 1, &pos1);
-
-	pos64 = merge_64(pos1, pos0);
+	syscall_get_arguments_deprecated(current, args->regs, 3, 1, &pos64);
+#endif /* CAPTURE_64BIT_ARGS_SINGLE_REGISTER */
 
 	res = val_to_ring(args, pos64, 0, false, 0);
-	if (unlikely(res != PPM_SUCCESS))
-		return res;
-#endif /* CAPTURE_64BIT_ARGS_SINGLE_REGISTER */
+	CHECK_RES(res);
 
 	return add_sentinel(args);
 }

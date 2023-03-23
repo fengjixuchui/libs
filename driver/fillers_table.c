@@ -81,7 +81,7 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_STAT_X] = {FILLER_REF(sys_autofill), 2, APT_REG, {{AF_ID_RETVAL}, {0} } },
 	[PPME_SYSCALL_LSTAT_E] = {FILLER_REF(sys_empty)},
 	[PPME_SYSCALL_LSTAT_X] = {FILLER_REF(sys_autofill), 2, APT_REG, {{AF_ID_RETVAL}, {0} } },
-	[PPME_SYSCALL_FSTAT_E] = {FILLER_REF(sys_single)},
+	[PPME_SYSCALL_FSTAT_E] = {FILLER_REF(sys_fstat_e)},
 	[PPME_SYSCALL_FSTAT_X] = {FILLER_REF(sys_single_x)},
 	[PPME_SYSCALL_STAT64_E] = {FILLER_REF(sys_empty)},
 	[PPME_SYSCALL_STAT64_X] = {FILLER_REF(sys_autofill), 2, APT_REG, {{AF_ID_RETVAL}, {0} } },
@@ -111,13 +111,9 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_UNLINK_X] = {FILLER_REF(sys_single_x)},
 	[PPME_SYSCALL_UNLINKAT_E] = {FILLER_REF(sys_autofill), 2, APT_REG, {{0}, {1} } },
 	[PPME_SYSCALL_UNLINKAT_X] = {FILLER_REF(sys_single_x)},
-	[PPME_SYSCALL_PREAD_E] = {FILLER_REF(sys_pread_e)},
+	[PPME_SYSCALL_PREAD_E] = {FILLER_REF(sys_pread64_e)},
 	[PPME_SYSCALL_PREAD_X] = {FILLER_REF(sys_read_x)},
-#ifdef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
-	[PPME_SYSCALL_PWRITE_E] = {FILLER_REF(sys_autofill), 3, APT_REG, {{0}, {2}, {3} } },
-#else
 	[PPME_SYSCALL_PWRITE_E] = {FILLER_REF(sys_pwrite64_e)},
- #endif
 	[PPME_SYSCALL_PWRITE_X] = {FILLER_REF(sys_write_x)},
 	[PPME_SYSCALL_READV_E] = {FILLER_REF(sys_readv_e)},
 	[PPME_SYSCALL_READV_X] = {FILLER_REF(sys_readv_preadv_x)},
@@ -215,7 +211,6 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_VFORK_20_X] = {FILLER_REF(proc_startupdate)},
 #ifdef CAPTURE_SIGNAL_DELIVERIES
 	[PPME_SIGNALDELIVER_E] = {FILLER_REF(sys_signaldeliver_e)},
-	[PPME_SIGNALDELIVER_X] = {FILLER_REF(sys_empty)},
 #endif
 	[PPME_SYSCALL_GETDENTS_E] = {FILLER_REF(sys_getdents_e)},
 	[PPME_SYSCALL_GETDENTS_X] = {FILLER_REF(sys_single_x)},
@@ -256,7 +251,6 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_EXECVE_19_X] = {FILLER_REF(proc_startupdate)},
 #ifdef CAPTURE_PAGE_FAULTS
 	[PPME_PAGE_FAULT_E] = {FILLER_REF(sys_pagefault_e)},
-	[PPME_PAGE_FAULT_X] = {FILLER_REF(sys_empty)}, /* `PPME_PAGE_FAULT_X` is never generated probably we don't need a filler! */
 #endif
 	[PPME_SYSCALL_BPF_2_E] = {FILLER_REF(sys_bpf_e)},
 	[PPME_SYSCALL_BPF_2_X] = {FILLER_REF(sys_bpf_x)},

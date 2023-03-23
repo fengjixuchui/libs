@@ -19,6 +19,7 @@ or GPL2.txt for full copies of the license.
 	FN(sys_getdents64_e)			\
 	FN(sys_single)				\
 	FN(sys_single_x)			\
+	FN(sys_fstat_e)				\
 	FN(sys_open_e)				\
 	FN(sys_open_x)				\
 	FN(sys_read_e)				\
@@ -55,7 +56,7 @@ or GPL2.txt for full copies of the license.
 	FN(sys_socket_bind_x)			\
 	FN(sys_poll_e)				\
 	FN(sys_poll_x)				\
-	FN(sys_pread_e)			\
+	FN(sys_pread64_e)			\
 	FN(sys_writev_e)			\
 	FN(sys_pwrite64_e)			\
 	FN(sys_readv_e)				\

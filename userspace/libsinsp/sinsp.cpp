@@ -566,9 +566,13 @@ void sinsp::open_udig()
 	open_common(&oargs);
 }
 
-void sinsp::open_nodriver()
+void sinsp::open_nodriver(bool full_proc_scan)
 {
 	scap_open_args oargs = factory_open_args(NODRIVER_ENGINE, SCAP_MODE_NODRIVER);
+	struct scap_nodriver_engine_params params;
+	params.full_proc_scan = full_proc_scan;
+
+	oargs.engine_params = &params;
 	open_common(&oargs);
 }
 
@@ -622,7 +626,7 @@ void sinsp::open_plugin(const std::string& plugin_name, const std::string& plugi
 	open_common(&oargs);
 }
 
-void sinsp::open_gvisor(const std::string& config_path, const std::string& root_path)
+void sinsp::open_gvisor(const std::string& config_path, const std::string& root_path, bool no_events)
 {
 	if(config_path.empty())
 	{
@@ -633,6 +637,7 @@ void sinsp::open_gvisor(const std::string& config_path, const std::string& root_
 	struct scap_gvisor_engine_params params;
 	params.gvisor_root_path = root_path.c_str();
 	params.gvisor_config_path = config_path.c_str();
+	params.no_events = no_events;
 	oargs.engine_params = &params;
 	open_common(&oargs);
 

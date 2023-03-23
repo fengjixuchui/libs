@@ -341,6 +341,13 @@ FILLER(sys_single_x, true)
 	return res;
 }
 
+FILLER(sys_fstat_e, true)
+{
+	/* Parameter 1: fd (type: PT_FD) */
+	s32 fd = (s32)bpf_syscall_get_argument(data, 0);
+	return bpf_val_to_ring(data, (s64)fd);
+}
+
 FILLER(sys_open_e, true)
 {
 	unsigned long flags;
@@ -805,26 +812,31 @@ FILLER(sys_readv_preadv_x, true)
 
 FILLER(sys_writev_e, true)
 {
-	unsigned long iovcnt;
-	unsigned long val;
-	int res;
+#ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
+#error Implement this
+#endif
+	/* Parameter 1: fd (type: PT_FD) */
+	s32 fd = (s32)bpf_syscall_get_argument(data, 0);
+	int res = bpf_val_to_ring(data, (s64)fd);
+	CHECK_RES(res);
 
-	/*
-	 * fd
-	 */
-	val = bpf_syscall_get_argument(data, 0);
-	res = bpf_val_to_ring(data, val);
-	if (res != PPM_SUCCESS)
-		return res;
+	unsigned long iov_pointer = bpf_syscall_get_argument(data, 1);
+	unsigned long iov_cnt = bpf_syscall_get_argument(data, 2);
 
-	val = bpf_syscall_get_argument(data, 1);
-	iovcnt = bpf_syscall_get_argument(data, 2);
+	/* Parameter 2: size (type: PT_UINT32) */
 	res = bpf_parse_readv_writev_bufs(data,
-					  (const struct iovec __user *)val,
-					  iovcnt,
+					  (const struct iovec __user *)iov_pointer,
+					  iov_cnt,
 					  0,
 					  PRB_FLAG_PUSH_SIZE | PRB_FLAG_IS_WRITE);
 
+	/* if there was an error we send a size equal to `0`.
+	 * we can improve this in the future but at least we don't lose the whole event.
+	 */
+	if(res == PPM_FAILURE_INVALID_USER_MEMORY)
+	{
+		res = bpf_val_to_ring(data, 0);
+	}
 	return res;
 }
 
@@ -844,7 +856,7 @@ FILLER(sys_writev_pwritev_x, true)
 		return res;
 
 	/*
-	 * data and size
+	 * data
 	 */
 	val = bpf_syscall_get_argument(data, 1);
 	iovcnt = bpf_syscall_get_argument(data, 2);
@@ -853,6 +865,14 @@ FILLER(sys_writev_pwritev_x, true)
 					  iovcnt,
 					  0,
 					  PRB_FLAG_PUSH_DATA | PRB_FLAG_IS_WRITE);
+
+	/* if there was an error we send an empty param.
+	 * we can improve this in the future but at least we don't lose the whole event.
+	 */
+	if(res == PPM_FAILURE_INVALID_USER_MEMORY)
+	{
+		res = bpf_push_empty_param(data);
+	}
 
 	return res;
 }
@@ -3942,34 +3962,33 @@ FILLER(sys_prlimit_x, true)
 
 FILLER(sys_pwritev_e, true)
 {
-	const struct iovec __user *iov;
-	unsigned long iovcnt;
-	unsigned long val;
-	int res;
+	/* Parameter 1: fd (type: PT_FD) */
+	s32 fd = (s32)bpf_syscall_get_argument(data, 0);
+	int res = bpf_val_to_ring(data, (s64)fd);
+	CHECK_RES(res);
 
-	/*
-	 * fd
-	 */
-	val = bpf_syscall_get_argument(data, 0);
-	res = bpf_val_to_ring(data, val);
-	if (res != PPM_SUCCESS)
-		return res;
+	unsigned long iov_pointer = bpf_syscall_get_argument(data, 1);
+	unsigned long iov_cnt = bpf_syscall_get_argument(data, 2);
 
-	iov = (const struct iovec __user *)bpf_syscall_get_argument(data, 1);
-	iovcnt = bpf_syscall_get_argument(data, 2);
-
+	/* Parameter 2: size (type: PT_UINT32) */
 	res = bpf_parse_readv_writev_bufs(data,
-					  iov,
-					  iovcnt,
+					  (const struct iovec __user *)iov_pointer,
+					  iov_cnt,
 					  0,
 					  PRB_FLAG_PUSH_SIZE | PRB_FLAG_IS_WRITE);
-	if (res != PPM_SUCCESS)
-		return res;
 
-	val = bpf_syscall_get_argument(data, 3);
-	res = bpf_val_to_ring_type(data, val, PT_UINT64);
+	/* if there was an error we send a size equal to `0`.
+	 * we can improve this in the future but at least we don't lose the whole event.
+	 */
+	if(res == PPM_FAILURE_INVALID_USER_MEMORY)
+	{
+		res = bpf_val_to_ring(data, 0);
+	}
+	CHECK_RES(res);
 
-	return res;
+	/* Parameter 3: pos (type: PT_UINT64) */
+	u64 pos = (u64)bpf_syscall_get_argument(data, 3);
+	return bpf_val_to_ring_type(data, pos, PT_UINT64);
 }
 
 FILLER(sys_getresuid_and_gid_x, true)
@@ -4848,7 +4867,7 @@ FILLER(sys_mkdir_e, true)
 	return bpf_val_to_ring(data, mode);
 }
 
-FILLER(sys_pread_e, true)
+FILLER(sys_pread64_e, true)
 {
 #ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
 #error Implement this
@@ -4856,7 +4875,6 @@ FILLER(sys_pread_e, true)
 	unsigned long val;
 	unsigned long size;
 	int res;
-	uint64_t pos64;
 	int32_t fd;
 
 	/*
@@ -4886,7 +4904,20 @@ FILLER(sys_pwrite64_e, true)
 #ifndef CAPTURE_64BIT_ARGS_SINGLE_REGISTER
 #error Implement this
 #endif
-	return PPM_FAILURE_BUG;
+
+	/* Parameter 1: fd (type: PT_FD) */
+	s32 fd = (s32)bpf_syscall_get_argument(data, 0);
+	int res = bpf_val_to_ring(data, (s64)fd);
+	CHECK_RES(res);
+	
+	/* Parameter 2: size (type: PT_UINT32) */
+	size_t size = bpf_syscall_get_argument(data, 2);
+	res = bpf_val_to_ring(data, size);
+	CHECK_RES(res);
+
+	/* Parameter 3: pos (type: PT_UINT64) */
+	u64 pos = (u64)bpf_syscall_get_argument(data, 3);
+	return bpf_val_to_ring(data, pos);
 }
 
 FILLER(sys_renameat_x, true)
