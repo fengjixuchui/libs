@@ -120,6 +120,13 @@ public:
 	bool is_enabled(const severity sev) const { return (sev <= m_sev); }
 
 	/**
+	 * Returns true if the logger has at least one output configured.
+	 *
+	 * Note that this is intentionally inline.
+	 */
+	bool has_output() const { return m_flags != OT_NONE; }
+
+	/**
 	 * Emit the given msg to the configured log sink if the given sev
 	 * is greater than or equal to the minimum configured logging severity.
 	 */
