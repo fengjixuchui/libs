@@ -185,6 +185,7 @@ if(NOT MINIMAL_BUILD)
 			cgroup_limits.cpp
 			cri.cpp
 			container_engine/cri.cpp
+			sinsp_resource_utilization.cpp
 			${CMAKE_CURRENT_BINARY_DIR}/cri.grpc.pb.cc
 			${CMAKE_CURRENT_BINARY_DIR}/cri.pb.cc
 			grpc_channel_registry.cpp
@@ -306,3 +307,8 @@ option(BUILD_LIBSINSP_EXAMPLES "Build libsinsp examples" ON)
 if (BUILD_LIBSINSP_EXAMPLES)
 	add_subdirectory(examples)
 endif()
+
+if(NOT DEFINED SINSP_AGENT_CGROUP_MEM_PATH_ENV_VAR)
+	set(SINSP_AGENT_CGROUP_MEM_PATH_ENV_VAR "AGENT_CGROUP_MEM_PATH")
+endif()
+add_definitions(-DSINSP_AGENT_CGROUP_MEM_PATH_ENV_VAR="${SINSP_AGENT_CGROUP_MEM_PATH_ENV_VAR}")

@@ -76,9 +76,9 @@ void sinsp_dumper::open(sinsp* inspector, const std::string& filename, bool comp
 		inspector->m_thread_manager->dump_threads_to_file(m_dumper);
 	}
 
-	inspector->m_container_manager.dump_containers(m_dumper);
+	inspector->m_container_manager.dump_containers(*this);
 
-	inspector->m_usergroup_manager.dump_users_groups(m_dumper);
+	inspector->m_usergroup_manager.dump_users_groups(*this);
 
 	m_nevts = 0;
 }
@@ -109,9 +109,9 @@ void sinsp_dumper::fdopen(sinsp* inspector, int fd, bool compress, bool threads_
 		inspector->m_thread_manager->dump_threads_to_file(m_dumper);
 	}
 
-	inspector->m_container_manager.dump_containers(m_dumper);
+	inspector->m_container_manager.dump_containers(*this);
 
-	inspector->m_usergroup_manager.dump_users_groups(m_dumper);
+	inspector->m_usergroup_manager.dump_users_groups(*this);
 
 	m_nevts = 0;
 }
@@ -125,12 +125,12 @@ void sinsp_dumper::close()
 	}
 }
 
-bool sinsp_dumper::is_open()
+bool sinsp_dumper::is_open() const
 {
 	return (m_dumper != NULL);
 }
 
-bool sinsp_dumper::written_events()
+bool sinsp_dumper::written_events() const
 {
 	return m_nevts;
 }
@@ -143,8 +143,16 @@ void sinsp_dumper::dump(sinsp_evt* evt)
 	}
 
 	scap_evt* pdevt = (evt->m_poriginal_evt)? evt->m_poriginal_evt : evt->m_pevt;
+	bool do_drop = false;
+	scap_dump_flags dflags;
 
-	int32_t res = scap_dump(m_dumper, pdevt, evt->m_cpuid, 0);
+	dflags = evt->get_dump_flags(&do_drop);
+	if(do_drop)
+	{
+		return;
+	}
+
+	int32_t res = scap_dump(m_dumper, pdevt, evt->m_cpuid, dflags);
 
 	if(res != SCAP_SUCCESS)
 	{
@@ -154,7 +162,7 @@ void sinsp_dumper::dump(sinsp_evt* evt)
 	m_nevts++;
 }
 
-uint64_t sinsp_dumper::written_bytes()
+uint64_t sinsp_dumper::written_bytes() const
 {
 	if(m_dumper == NULL)
 	{
@@ -170,7 +178,7 @@ uint64_t sinsp_dumper::written_bytes()
 	return written_bytes;
 }
 
-uint64_t sinsp_dumper::next_write_position()
+uint64_t sinsp_dumper::next_write_position() const
 {
 	if(m_dumper == NULL)
 	{

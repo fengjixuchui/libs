@@ -330,3 +330,69 @@ TEST_F(sinsp_with_test_input, event_category)
 	ASSERT_EQ(evt->get_category(), EC_OTHER);
 	ASSERT_EQ(get_field_as_string(evt, "evt.category"), "other");
 }
+
+/* Check that enum flags are correctly handled,
+ * even when a single enum value is matched by multiple flags.
+ */
+TEST_F(sinsp_with_test_input, enumparams)
+{
+	add_default_init_thread();
+
+	open_inspector();
+	sinsp_evt* evt = NULL;
+	sinsp_evt_param* param = NULL;
+
+	/* `PPME_SOCKET_SOCKET_E` is a simple event that uses a PT_ENUMFLAGS32 (param 1) */
+	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SOCKET_SOCKET_E, 3, PPM_AF_UNIX, 0, 0);
+
+	param = evt->get_param(0);
+	ASSERT_EQ(*(uint32_t *)param->m_val, PPM_AF_UNIX);
+
+	const char *val_str = NULL;
+	evt->get_param_as_str(0, &val_str);
+	// Since the enum value "1" matches multiple flags values,
+	// we expect a space-separated list of them
+	ASSERT_STREQ(val_str, "AF_LOCAL|AF_UNIX");
+}
+
+TEST_F(sinsp_with_test_input, enumparams_fcntl_dupfd)
+{
+	add_default_init_thread();
+
+	open_inspector();
+	sinsp_evt* evt = NULL;
+	sinsp_evt_param* param = NULL;
+
+	/* `PPME_SYSCALL_FCNTL_E` is a simple event that uses a PT_ENUMFLAGS32 (param 2) */
+	uint8_t flag = PPM_FCNTL_F_DUPFD;
+	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_FCNTL_E, 2, 0, flag);
+
+	param = evt->get_param(1);
+	ASSERT_EQ(*(uint8_t *)param->m_val, PPM_FCNTL_F_DUPFD);
+
+	const char *val_str = NULL;
+	evt->get_param_as_str(1, &val_str);
+	ASSERT_STREQ(val_str, "F_DUPFD");
+}
+
+/* Check that bitmask flags are correctly handled
+ */
+TEST_F(sinsp_with_test_input, bitmaskparams)
+{
+	add_default_init_thread();
+
+	open_inspector();
+	sinsp_evt* evt = NULL;
+	sinsp_evt_param* param = NULL;
+
+	int64_t dirfd = 0;
+	/* `PPME_SYSCALL_OPENAT_E` is a simple event that uses a PT_FLAGS32 (param 3) */
+	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_OPENAT_E, 4, dirfd, "/tmp/foo", PPM_O_RDONLY|PPM_O_CLOEXEC, 0);
+
+	param = evt->get_param(2);
+	ASSERT_EQ(*(uint32_t *)param->m_val, PPM_O_RDONLY|PPM_O_CLOEXEC);
+
+	const char *val_str = NULL;
+	evt->get_param_as_str(2, &val_str);
+	ASSERT_STREQ(val_str, "O_RDONLY|O_CLOEXEC");
+}

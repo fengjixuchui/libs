@@ -664,56 +664,49 @@ void copy_and_sanitize_path(char* target, char* targetbase, const char* path, ch
 		}
 		else
 		{
-			if(*pc == '.' && *(pc + 1) == '.' && *(pc + 2) == separator)
+			//
+			// If path begins with '.' or '.' is the first char after a '/'
+			//
+			if(*pc == '.' && (tc == targetbase || *(tc - 1) == separator))
 			{
 				//
 				// '../', rewind to the previous separator
 				//
-				rewind_to_parent_path(targetbase, &tc, &pc, 3);
-
-			}
-			else if(*pc == '.' && *(pc + 1) == '.')
-			{
+				if(*(pc + 1) == '.' && *(pc + 2) == separator)
+				{
+					rewind_to_parent_path(targetbase, &tc, &pc, 3);
+				}
 				//
 				// '..', with no separator.
 				// This is valid if we are at the end of the string, and in that case we rewind.
-				// Otherwise it shouldn't happen and we leave the string intact
 				//
-				if(*(pc + 2) == 0)
+				else if(*(pc + 1) == '.' && *(pc + 2) == 0)
 				{
 					rewind_to_parent_path(targetbase, &tc, &pc, 2);
 				}
-				else
-				{
-					*tc = '.';
-					*(tc + 1) = '.';
-					pc += 2;
-					tc += 2;
-				}
-			}
-			else if(*pc == '.' && *(pc + 1) == separator)
-			{
 				//
 				// './', just skip it
 				//
-				pc += 2;
-			}
-			else if(*pc == '.')
-			{
+				else if(*(pc + 1) == separator)
+				{
+					pc += 2;
+				}
 				//
 				// '.', with no separator.
 				// This is valid if we are at the end of the string, and in that case we rewind.
-				// Otherwise it shouldn't happen and we leave the string intact
 				//
-				if(*(pc + 1) == 0)
+				else if(*(pc + 1) == 0)
 				{
 					pc++;
 				}
+				//
+				// Otherwise, we leave the string intact.
+				//
 				else
 				{
 					*tc = *pc;
-					tc++;
 					pc++;
+					tc++;
 				}
 			}
 			else if(*pc == separator)

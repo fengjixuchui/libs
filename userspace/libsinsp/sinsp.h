@@ -487,6 +487,13 @@ public:
 	const scap_machine_info* get_machine_info();
 
 	/*!
+	  \brief Return information about the agent based on start up conditions.
+
+	  \note not for use in scap files.
+	*/
+	const scap_agent_info* get_agent_info();
+
+	/*!
 	  \brief Look up a thread given its tid and return its information,
 	   and optionally go dig into proc if the thread is not in the thread table.
 
@@ -1060,9 +1067,10 @@ private:
 	// the parsing engine
 	sinsp_parser* m_parser;
 	// the statistics analysis engine
-	scap_dumper_t* m_dumper;
+	std::unique_ptr<sinsp_dumper> m_dumper;
 	bool m_is_dumping;
 	const scap_machine_info* m_machine_info;
+	const scap_agent_info* m_agent_info;
 	uint32_t m_num_cpus;
 	sinsp_thread_privatestate_manager m_thread_privatestate_manager;
 	bool m_is_tracers_capture_enabled;

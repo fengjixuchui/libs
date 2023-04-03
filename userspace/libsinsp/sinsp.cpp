@@ -85,7 +85,6 @@ sinsp::sinsp(bool static_container, const std::string &static_id, const std::str
 #endif
 	m_h = NULL;
 	m_parser = NULL;
-	m_dumper = NULL;
 	m_is_dumping = false;
 	m_metaevt = NULL;
 	m_meinfo.m_piscapevt = NULL;
@@ -100,6 +99,7 @@ sinsp::sinsp(bool static_container, const std::string &static_id, const std::str
 	m_filter = NULL;
 	m_fds_to_remove = new std::vector<int64_t>;
 	m_machine_info = NULL;
+	m_agent_info = NULL;
 #ifdef SIMULATE_DROP_MODE
 	m_isdropping = false;
 #endif
@@ -317,6 +317,15 @@ void sinsp::init()
 	{
 		ASSERT(false);
 		m_num_cpus = 0;
+	}
+
+	//
+	// Retrieve agent information
+	//
+	m_agent_info = scap_get_agent_info(m_h);
+	if (m_agent_info == NULL)
+	{
+		ASSERT(false);
 	}
 
 	//
@@ -776,10 +785,10 @@ void sinsp::close()
 		m_h = NULL;
 	}
 
-	if(NULL != m_dumper)
+	if(m_dumper != nullptr)
 	{
-		scap_dump_close(m_dumper);
-		m_dumper = NULL;
+		m_dumper->close();
+		m_dumper.reset(nullptr);
 	}
 
 	m_is_dumping = false;
@@ -815,25 +824,24 @@ void sinsp::autodump_start(const std::string& dump_filename, bool compress)
 		throw sinsp_exception("inspector not opened yet");
 	}
 
+	std::unique_ptr<sinsp_dumper> dumper(new sinsp_dumper);
+
 	if(compress)
 	{
-		m_dumper = scap_dump_open(m_h, dump_filename.c_str(), SCAP_COMPRESSION_GZIP, false);
+		dumper->open(this, dump_filename.c_str(), SCAP_COMPRESSION_GZIP, false);
 	}
 	else
 	{
-		m_dumper = scap_dump_open(m_h, dump_filename.c_str(), SCAP_COMPRESSION_NONE, false);
+		dumper->open(this, dump_filename.c_str(), SCAP_COMPRESSION_NONE, false);
 	}
 
 	m_is_dumping = true;
 
-	if(NULL == m_dumper)
-	{
-		throw sinsp_exception(scap_getlasterr(m_h));
-	}
+	m_dumper = std::move(dumper);
 
-	m_container_manager.dump_containers(m_dumper);
+	m_container_manager.dump_containers(*m_dumper);
 
-	m_usergroup_manager.dump_users_groups(m_dumper);
+	m_usergroup_manager.dump_users_groups(*m_dumper);
 }
 
 void sinsp::autodump_next_file()
@@ -851,7 +859,7 @@ void sinsp::autodump_stop()
 
 	if(m_dumper != NULL)
 	{
-		scap_dump_close(m_dumper);
+		m_dumper->close();
 		m_dumper = NULL;
 	}
 
@@ -1438,19 +1446,9 @@ int32_t sinsp::next(OUT sinsp_evt **puevt)
 	//
 	if(NULL != m_dumper)
 	{
-		scap_dump_flags dflags;
-
-		bool do_drop = false;
-		dflags = evt->get_dump_flags(&do_drop);
-		if(do_drop)
-		{
-			*puevt = evt;
-			return SCAP_TIMEOUT;
-		}
-
 		if(m_write_cycling)
 		{
-			switch(m_cycle_writer->consider(evt))
+			switch(m_cycle_writer->consider(evt, m_dumper->written_bytes()))
 			{
 				case cycle_writer::NEWFILE:
 					autodump_next_file();
@@ -1467,14 +1465,7 @@ int32_t sinsp::next(OUT sinsp_evt **puevt)
 			}
 		}
 
-		scap_evt* pdevt = (evt->m_poriginal_evt)? evt->m_poriginal_evt : evt->m_pevt;
-
-		res = scap_dump(m_dumper, pdevt, evt->m_cpuid, dflags);
-
-		if(SCAP_SUCCESS != res)
-		{
-			throw sinsp_exception(scap_dump_getlasterr(m_dumper));
-		}
+		m_dumper->dump(evt);
 	}
 
 	if(evt->m_filtered_out)
@@ -1846,6 +1837,11 @@ const scap_machine_info* sinsp::get_machine_info()
 	return m_machine_info;
 }
 
+const scap_agent_info* sinsp::get_agent_info()
+{
+	return m_agent_info;
+}
+
 void sinsp::get_filtercheck_fields_info(OUT std::vector<const filter_check_info*>& list)
 {
 	sinsp_utils::get_filtercheck_fields_info(list);
@@ -2015,7 +2011,7 @@ bool sinsp::setup_cycle_writer(std::string base_file_name, int rollover_mb, int 
 		m_write_cycling = true;
 	}
 
-	return m_cycle_writer->setup(base_file_name, rollover_mb, duration_seconds, file_limit, event_limit, &m_dumper);
+	return m_cycle_writer->setup(base_file_name, rollover_mb, duration_seconds, file_limit, event_limit);
 }
 
 double sinsp::get_read_progress_file()

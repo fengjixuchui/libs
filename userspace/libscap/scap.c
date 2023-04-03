@@ -83,15 +83,13 @@ int32_t scap_init_live_int(scap_t* handle, scap_open_args* oargs, const struct s
 	// Extract machine information
 	//
 
-	handle->m_machine_info.num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-	handle->m_machine_info.memory_size_bytes = (uint64_t)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE);
-	gethostname(handle->m_machine_info.hostname, sizeof(handle->m_machine_info.hostname) / sizeof(handle->m_machine_info.hostname[0]));
-	handle->m_machine_info.boot_ts_epoch = boot_time;
-	handle->m_machine_info.reserved2 = 0;
-	handle->m_machine_info.reserved3 = 0;
-	handle->m_machine_info.reserved4 = 0;
-	handle->m_driver_procinfo = NULL;
-	handle->m_fd_lookup_limit = 0;
+	scap_retrieve_machine_info(handle, boot_time);
+
+	//
+	// Extract agent information
+	//
+
+	scap_retrieve_agent_info(handle);
 
 	//
 	// Create the interface list
@@ -200,15 +198,13 @@ int32_t scap_init_udig_int(scap_t* handle, scap_open_args* oargs)
 	// Extract machine information
 	//
 
-	handle->m_machine_info.num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-	handle->m_machine_info.memory_size_bytes = (uint64_t)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE);
-	gethostname(handle->m_machine_info.hostname, sizeof(handle->m_machine_info.hostname) / sizeof(handle->m_machine_info.hostname[0]));
-	handle->m_machine_info.boot_ts_epoch = boot_time;
-	handle->m_machine_info.reserved2 = 0;
-	handle->m_machine_info.reserved3 = 0;
-	handle->m_machine_info.reserved4 = 0;
-	handle->m_driver_procinfo = NULL;
-	handle->m_fd_lookup_limit = 0;
+	scap_retrieve_machine_info(handle, boot_time);
+
+	//
+	// Extract agent information
+	//
+
+	scap_retrieve_agent_info(handle);
 
 	//
 	// Create the interface list
@@ -446,20 +442,18 @@ int32_t scap_init_nodriver_int(scap_t* handle, scap_open_args* oargs)
 	// Extract machine information
 	//
 
-	handle->m_machine_info.num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-	handle->m_machine_info.memory_size_bytes = (uint64_t)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE);
-	gethostname(handle->m_machine_info.hostname, sizeof(handle->m_machine_info.hostname) / sizeof(handle->m_machine_info.hostname[0]));
-	handle->m_machine_info.boot_ts_epoch = boot_time;
-	handle->m_machine_info.reserved2 = 0;
-	handle->m_machine_info.reserved3 = 0;
-	handle->m_machine_info.reserved4 = 0;
-	handle->m_driver_procinfo = NULL;
-
+	scap_retrieve_machine_info(handle, boot_time);
 	if(!engine_params || !engine_params->full_proc_scan)
 	{
 		handle->m_minimal_scan = true;
 		handle->m_fd_lookup_limit = SCAP_NODRIVER_MAX_FD_LOOKUP; // fd lookup is limited here because is very expensive
 	}
+
+	//
+	// Extract agent information
+	//
+
+	scap_retrieve_agent_info(handle);
 
 	//
 	// Create the interface list
@@ -527,20 +521,14 @@ int32_t scap_init_plugin_int(scap_t* handle, scap_open_args* oargs)
 	//
 	// Extract machine information
 	//
-#ifdef _WIN32
-	handle->m_machine_info.num_cpus = 0;
-	handle->m_machine_info.memory_size_bytes = 0;
-#else
-	handle->m_machine_info.num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-	handle->m_machine_info.memory_size_bytes = (uint64_t)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE);
-#endif
-	gethostname(handle->m_machine_info.hostname, sizeof(handle->m_machine_info.hostname) / sizeof(handle->m_machine_info.hostname[0]));
-	handle->m_machine_info.boot_ts_epoch = 0; // plugin does not need boot_ts_epoch
-	handle->m_machine_info.reserved2 = 0;
-	handle->m_machine_info.reserved3 = 0;
-	handle->m_machine_info.reserved4 = 0;
-	handle->m_driver_procinfo = NULL;
+	scap_retrieve_machine_info(handle, (uint64_t)0);
 	handle->m_fd_lookup_limit = SCAP_NODRIVER_MAX_FD_LOOKUP; // fd lookup is limited here because is very expensive
+
+	//
+	// Extract agent information
+	//
+
+	scap_retrieve_agent_info(handle);
 
 	if((rc = handle->m_vtable->init(handle, oargs)) != SCAP_SUCCESS)
 	{
@@ -705,9 +693,9 @@ void scap_deinit(scap_t* handle)
 	{
 		/* The capture should be stopped before
 		 * closing the engine, here we only enforce it.
-	     * Please note that there are some corner cases in which 
+		 * Please note that there are some corner cases in which
 		 * we call `scap_close` before the engine is validated
-		 * so we need to pay attention to NULL pointers in the 
+		 * so we need to pay attention to NULL pointers in the
 		 * following v-table methods.
 		 */
 		handle->m_vtable->stop_capture(handle->m_engine);
@@ -972,6 +960,14 @@ const scap_machine_info* scap_get_machine_info(scap_t* handle)
 	}
 }
 
+//
+// Get the agent information
+//
+const scap_agent_info* scap_get_agent_info(scap_t* handle)
+{
+	return (const scap_agent_info*)&handle->m_agent_info;
+}
+
 int32_t scap_set_snaplen(scap_t* handle, uint32_t snaplen)
 {
 	if(handle->m_vtable)
@@ -1221,53 +1217,52 @@ uint64_t scap_get_driver_schema_version(scap_t* handle)
 
 int32_t scap_get_boot_time(char* last_err, uint64_t *boot_time)
 {
-#ifdef __linux__
-	struct timespec ts_uptime = {0};
-	struct timespec tv_now = {0};
-	uint64_t now = 0;
-	uint64_t uptime = 0;
-	char proc_dir[PPM_MAX_PATH_SIZE];
-	struct stat targetstat = {0};
-
-	/* More reliable way to get boot time */
-	snprintf(proc_dir, sizeof(proc_dir), "%s/proc/1/", scap_get_host_root());
-	if (stat(proc_dir, &targetstat) == 0)
-	{
-		/* This approach is constant between agent re-boots */
-		*boot_time = targetstat.st_ctim.tv_sec * (uint64_t) SECOND_TO_NS + targetstat.st_ctim.tv_nsec;
-		return SCAP_SUCCESS;
-	}
-
-	/*
-	 * Fall-back method
-	 */
-
-	/* Get the actual time */
-	if(clock_gettime(CLOCK_REALTIME, &tv_now))
-	{
-		if(last_err != NULL)
-		{
-			snprintf(last_err, SCAP_LASTERR_SIZE, "clock_gettime(): unable to get the 'CLOCK_REALTIME'");
-		}
-		return SCAP_FAILURE;
-	}
-	now = tv_now.tv_sec * (uint64_t)SECOND_TO_NS + tv_now.tv_nsec;
-
-	/* Get the uptime since the boot */
-	if(clock_gettime(CLOCK_BOOTTIME, &ts_uptime))
-	{
-		if(last_err != NULL)
-		{
-			snprintf(last_err, SCAP_LASTERR_SIZE, "clock_gettime(): unable to get the 'CLOCK_BOOTTIME'");
-		}
-		return SCAP_FAILURE;
-	}
-	uptime = ts_uptime.tv_sec * (uint64_t)SECOND_TO_NS + ts_uptime.tv_nsec;
-
-	/* Compute the boot time as the difference between actual time and the uptime. */
-	*boot_time = now - uptime;
-#else
 	*boot_time = 0;
+
+#ifdef __linux__
+	uint64_t btime = 0;
+	char proc_stat[PPM_MAX_PATH_SIZE];
+	char line[512];
+
+	/* Get boot time from btime value in /proc/stat
+	 * ref: https://github.com/falcosecurity/libs/issues/932
+	 * /proc/uptime and btime in /proc/stat are fed by the same kernel sources.
+	 *
+	 * Multiple ways to get boot time:
+	 *	btime in /proc/stat
+	 *	calculation via clock_gettime(CLOCK_REALTIME - CLOCK_BOOTTIME)
+	 *	calculation via time(NULL) - sysinfo().uptime
+	 *
+	 * Maintainers preferred btime in /proc/stat because:
+	 *	value does not depend on calculation using current timestamp
+	 *	btime is "static" and doesn't change once set
+	 *	btime is available in kernels from 2008
+	 *	CLOCK_BOOTTIME is available in kernels from 2011 (2.6.38
+	 *
+	 * By scraping btime from /proc/stat,
+	 * it is both the heaviest and most likely to succeed
+	 */
+	snprintf(proc_stat, sizeof(proc_stat), "%s/proc/stat", scap_get_host_root());
+	FILE* f = fopen(proc_stat, "r");
+	if (f == NULL)
+	{
+		ASSERT(false);
+		return SCAP_FAILURE;
+	}
+
+	while(fgets(line, sizeof(line), f) != NULL)
+	{
+		if(sscanf(line, "btime %" PRIu64, &btime) == 1)
+		{
+			fclose(f);
+			*boot_time = btime * (uint64_t) SECOND_TO_NS;
+			return SCAP_SUCCESS;
+		}
+	}
+	fclose(f);
+	ASSERT(false);
+	return SCAP_FAILURE;
+
 #endif
 	return SCAP_SUCCESS;
 }

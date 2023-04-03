@@ -46,6 +46,11 @@ if(NOT DEFINED SCAP_HOST_ROOT_ENV_VAR_NAME)
 endif()
 add_definitions(-DSCAP_HOST_ROOT_ENV_VAR_NAME="${SCAP_HOST_ROOT_ENV_VAR_NAME}")
 
+if(NOT DEFINED SCAP_HOSTNAME_ENV_VAR)
+	set(SCAP_HOSTNAME_ENV_VAR "SCAP_HOSTNAME")
+endif()
+add_definitions(-DSCAP_HOSTNAME_ENV_VAR="${SCAP_HOSTNAME_ENV_VAR}")
+
 if (DEFINED SCAP_BPF_PROGS_TAIL_CALLED_MAX)
 	add_definitions(-DBPF_PROGS_TAIL_CALLED_MAX=${SCAP_BPF_PROGS_TAIL_CALLED_MAX})
 endif()
@@ -57,6 +62,7 @@ list(APPEND targetfiles
 	scap_savefile.c
 	scap_procs.c
 	scap_userlist.c
+	scap_machine_agent.c
 	scap_suppress.c)
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
