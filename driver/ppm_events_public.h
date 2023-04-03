@@ -1638,7 +1638,18 @@ enum extra_event_prog_code
 	PPM_SC_X(SCHED_SWITCH, 397) \
 	PPM_SC_X(PAGE_FAULT_USER, 398) \
 	PPM_SC_X(PAGE_FAULT_KERNEL, 399) \
-	PPM_SC_X(SIGNAL_DELIVER, 400)
+	PPM_SC_X(SIGNAL_DELIVER, 400) \
+	PPM_SC_X(TIMERFD, 401) \
+	PPM_SC_X(S390_PCI_MMIO_READ, 402) \
+	PPM_SC_X(SIGACTION, 403) \
+	PPM_SC_X(S390_PCI_MMIO_WRITE, 404) \
+	PPM_SC_X(READDIR, 405) \
+	PPM_SC_X(S390_STHYI, 406) \
+	PPM_SC_X(SIGSUSPEND, 407) \
+	PPM_SC_X(IDLE, 408) \
+	PPM_SC_X(S390_RUNTIME_INSTR, 409) \
+	PPM_SC_X(SIGRETURN, 410) \
+	PPM_SC_X(S390_GUARDED_STORAGE, 411)
 
 typedef enum {
 #define PPM_SC_X(name, value) PPM_SC_##name = (value),
@@ -2000,10 +2011,6 @@ struct ppm_event_entry {
 #define PPM_FAILURE_BUG -3
 #define PPM_SKIP_EVENT -4
 #define PPM_FAILURE_FRAME_SCRATCH_MAP_FULL -5	/* this is used only inside bpf, kernel module does not have a frame scratch map*/
-
-#define RW_SNAPLEN 80
-#define RW_MAX_SNAPLEN PPM_MAX_ARG_SIZE
-#define RW_MAX_FULLCAPTURE_PORT_SNAPLEN 16000
 
 /*
  * machine_info flags.

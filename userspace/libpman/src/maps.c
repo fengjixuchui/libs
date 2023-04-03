@@ -87,6 +87,22 @@ void pman_set_drop_failed(bool drop_failed)
 	g_state.skel->bss->g_settings.drop_failed = drop_failed;
 }
 
+void pman_set_do_dynamic_snaplen(bool do_dynamic_snaplen)
+{
+	g_state.skel->bss->g_settings.do_dynamic_snaplen = do_dynamic_snaplen;
+}
+
+void pman_set_fullcapture_port_range(uint16_t range_start, uint16_t range_end)
+{
+	g_state.skel->bss->g_settings.fullcapture_port_range_start = range_start;
+	g_state.skel->bss->g_settings.fullcapture_port_range_end = range_end;
+}
+
+void pman_set_statsd_port(uint16_t statsd_port)
+{
+	g_state.skel->bss->g_settings.statsd_port = statsd_port;
+}
+
 void pman_mark_single_64bit_syscall(int intersting_syscall_id, bool interesting)
 {
 	g_state.skel->bss->g_64bit_interesting_syscalls_table[intersting_syscall_id] = interesting;
@@ -331,7 +347,12 @@ int pman_finalize_maps_after_loading()
 
 	/* set bpf global variables. */
 	pman_set_snaplen(80);
+	pman_set_dropping_mode(false);
+	pman_set_sampling_ratio(1);
 	pman_set_drop_failed(false);
+	pman_set_do_dynamic_snaplen(false);
+	pman_set_fullcapture_port_range(0, 0);
+	pman_set_statsd_port(PPM_PORT_STATSD);
 
 	/* We have to fill all ours tail tables. */
 	pman_fill_syscall_sampling_table();
