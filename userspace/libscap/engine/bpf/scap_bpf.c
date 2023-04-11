@@ -1352,7 +1352,7 @@ static int32_t set_default_settings(struct bpf_engine *handle)
 	struct scap_bpf_settings settings;
 
 	uint64_t boot_time = 0;
-	if(scap_get_boot_time(handle->m_lasterr, &boot_time) != SCAP_SUCCESS)
+	if(scap_get_precise_boot_time(handle->m_lasterr, &boot_time) != SCAP_SUCCESS)
 	{
 		return SCAP_FAILURE;
 	}
@@ -1744,6 +1744,19 @@ static int32_t init(scap_t* handle, scap_open_args *oargs)
 	{
 		return rc;
 	}
+
+	/* Here we are covering the case in which some syscalls don't have an associated ppm_sc
+	 * and so we cannot set them as (un)interesting. For this reason, we default them to 0.
+	 * Please note this is an extra check since our ppm_sc should already cover all possible syscalls.
+	 */
+	for(int i = 0; i < SYSCALL_TABLE_SIZE; i++)
+	{
+		rc = set_single_syscall_of_interest(engine.m_handle, i, false);
+		if(rc != SCAP_SUCCESS)
+		{
+			return rc;
+		}
+	}	
 
 	/* Store interesting sc codes */
 	memcpy(&engine.m_handle->curr_sc_set, &oargs->ppm_sc_of_interest, sizeof(interesting_ppm_sc_set));

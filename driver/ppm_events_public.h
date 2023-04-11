@@ -16,7 +16,7 @@ or GPL2.txt for full copies of the license.
 
 #ifdef __KERNEL__
 #include <linux/types.h>
-#elif __USE_VMLINUX__ 
+#elif defined(__USE_VMLINUX__ )
 /* In the modern probe, if we have the vmlinux.h we need nothing here. */
 #else
 #include "../userspace/common/types.h"
@@ -1230,7 +1230,10 @@ enum extra_event_prog_code
 	T2_CLONE3_X = 10,
 	T2_FORK_X = 11,
 	T2_VFORK_X = 12,
-	TAIL_EXTRA_EVENT_PROG_MAX = 13
+	T1_DROP_E = 13,
+	T1_DROP_X = 14,
+	T1_HOTPLUG_E = 15,
+	TAIL_EXTRA_EVENT_PROG_MAX = 16
 };
 
 /*

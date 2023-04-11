@@ -137,7 +137,7 @@ set_scap_target_properties(scap_event_schema)
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 	add_library(driver_event_schema
-		../../driver/syscall_table.c
+		../../driver/syscall_table64.c
 		../../driver/fillers_table.c)
 	target_link_libraries(scap_event_schema driver_event_schema)
 	set_scap_target_properties(scap_event_schema)
@@ -225,6 +225,28 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME MATCHES "Linux
 		endif()
 	endif()
 endif()
+
+# We might need to filter this.
+get_target_property(scap_link_libraries scap LINK_LIBRARIES)
+if(TARGET scap_engine_bpf)
+	get_target_property(scap_engine_bpf_link_libraries scap_engine_bpf LINK_LIBRARIES)
+	if (scap_engine_bpf_link_libraries)
+		list(APPEND scap_link_libraries ${scap_engine_bpf_link_libraries})
+	endif()
+endif()
+#get_target_property(scap_engine_kmod_link_libraries scap_engine_kmod LINK_LIBRARIES)
+get_target_property(scap_event_schema_link_libraries scap_event_schema LINK_LIBRARIES)
+if (scap_event_schema_link_libraries)
+	list(APPEND scap_link_libraries ${scap_event_schema_link_libraries})
+endif()
+
+set(scap_link_flags "")
+foreach(link_library scap_engine_noop ${scap_link_libraries})
+	list(APPEND scap_link_flags "-l${link_library}")
+endforeach()
+list(REMOVE_DUPLICATES scap_link_flags)
+string(REPLACE ";" " " SCAP_LINK_LIBRARIES_FLAGS "${scap_link_flags}")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/libscap.pc.in ${CMAKE_CURRENT_BINARY_DIR}/libscap.pc @ONLY)
 
 if (BUILD_LIBSCAP_EXAMPLES)
 	add_subdirectory(examples/01-open)

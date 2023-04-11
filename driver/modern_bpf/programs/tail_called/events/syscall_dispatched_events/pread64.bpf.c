@@ -16,7 +16,7 @@ int BPF_PROG(pread64_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, PREAD64_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, PREAD64_E_SIZE))
 	{
 		return 0;
 	}
@@ -92,7 +92,7 @@ int BPF_PROG(pread64_x,
 
 	auxmap__finalize_event_header(auxmap);
 
-	auxmap__submit_event(auxmap);
+	auxmap__submit_event(auxmap, ctx);
 
 	return 0;
 }

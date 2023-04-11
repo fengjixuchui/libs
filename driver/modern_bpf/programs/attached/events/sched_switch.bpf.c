@@ -10,7 +10,7 @@ int BPF_PROG(sched_switch,
 	     bool preempt, struct task_struct *prev,
 	     struct task_struct *next)
 {
-	if(sampling_logic(PPME_SCHEDSWITCH_6_E, TRACEPOINT))
+	if(sampling_logic(ctx, PPME_SCHEDSWITCH_6_E, TRACEPOINT))
 	{
 		return 0;
 	}
@@ -18,7 +18,7 @@ int BPF_PROG(sched_switch,
 	/// TODO: we could avoid switches from kernel threads to kernel threads (?).
 
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, SCHED_SWITCH_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SCHED_SWITCH_SIZE))
 	{
 		return 0;
 	}

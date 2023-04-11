@@ -18,13 +18,13 @@ int BPF_PROG(pf_user,
 	     unsigned long address, struct pt_regs *regs,
 	     unsigned long error_code)
 {
-	if(sampling_logic(PPME_PAGE_FAULT_E, TRACEPOINT))
+	if(sampling_logic(ctx, PPME_PAGE_FAULT_E, TRACEPOINT))
 	{
 		return 0;
 	}
 
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, PAGE_FAULT_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, PAGE_FAULT_SIZE))
 	{
 		return 0;
 	}
