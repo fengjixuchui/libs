@@ -7111,4 +7111,70 @@ FILLER(sched_prog_fork_3, false)
 }
 #endif
 
+FILLER(sys_prctl_x, true)
+{
+	unsigned long option;
+	unsigned long arg2;
+	unsigned long arg2_int;
+	int res;
+	long retval;
+
+	retval = bpf_syscall_get_retval(data->ctx);
+	res = bpf_val_to_ring(data, retval);
+	CHECK_RES(res);
+
+	/*
+	 * option
+	 */
+	option = prctl_options_to_scap(bpf_syscall_get_argument(data, 0));
+	res = bpf_val_to_ring(data, option);
+	CHECK_RES(res);
+
+	arg2 = bpf_syscall_get_argument(data, 1);
+
+	switch(option){
+		case PPM_PR_GET_NAME:
+		case PPM_PR_SET_NAME:
+			/*
+			 * arg2_str
+			 */
+			res = bpf_val_to_ring(data, arg2);
+			CHECK_RES(res);
+			/*
+			 * arg2_int
+			 */
+			res = bpf_val_to_ring(data, 0);
+			CHECK_RES(res);
+			break;
+		case PPM_PR_GET_CHILD_SUBREAPER:
+			/*
+			 * arg2_str
+			 */
+			res = bpf_push_empty_param(data);
+			CHECK_RES(res);
+			/*
+			 * arg2_int
+			 */
+			bpf_probe_read_user(&arg2_int,sizeof(arg2_int),(void*)arg2);
+			res = bpf_val_to_ring(data, (int)arg2_int);
+			CHECK_RES(res);
+			break;
+		case PPM_PR_SET_CHILD_SUBREAPER:
+		default:
+			/*
+			 * arg2_str
+			 */
+			res = bpf_push_empty_param(data);
+			CHECK_RES(res);
+			/*
+			 * arg2_int
+			 */
+			res = bpf_val_to_ring(data, arg2);
+			CHECK_RES(res);
+			break;
+	}
+
+	return res;
+}
+
 #endif

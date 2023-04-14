@@ -45,11 +45,13 @@ void json_dump(sinsp& inspector);
 void json_dump_init(sinsp& inspector);
 void json_dump_reinit_evt_formatter(sinsp& inspector);
 
-std::unordered_set<std::string> extract_filter_events(sinsp& inspector);
+libsinsp::events::set<ppm_sc_code> extract_filter_sc_codes(sinsp& inspector);
 std::function<void(sinsp& inspector)> dump;
 static bool g_interrupted = false;
 static const uint8_t g_backoff_timeout_secs = 2;
 static bool g_all_threads = false;
+static bool ppm_sc_modifies_state = false;
+static bool ppm_sc_repair_state = false;
 static bool json_dump_init_success = false;
 string engine_string = KMOD_ENGINE; /* Default for backward compatibility. */
 string filter_string = "";
@@ -92,6 +94,8 @@ Options:
   -o <fields>, --output-fields-json <fields> [JSON support only, can also use without -j] Output fields string (see <filter> for supported display fields) that overwrites JSON default output fields for all events. * at the beginning prints JSON keys with null values, else no null fields are printed.
   -E, --exclude-users                        Don't create the user/group tables
   -n, --num-events                           Number of events to be retrieved (no limit by default)
+  -z, --ppm-sc-modifies-state                Select ppm sc codes from filter AST plus enforce sinsp state ppm sc via `sinsp_state_sc_set`.
+  -x, --ppm-sc-repair-state                  Select ppm sc codes from filter AST plus enforce sinsp state ppm sc via `sinsp_repair_state_sc_set`.
 )";
 	cout << usage << endl;
 }
@@ -113,12 +117,14 @@ void parse_CLI_options(sinsp& inspector, int argc, char** argv)
 		{"output-fields-json", required_argument, 0, 'o'},
 		{"exclude-users", no_argument, 0, 'E'},
 		{"num-events", required_argument, 0, 'n'},
+		{"ppm-sc-modifies-state", no_argument, 0, 'z'},
+		{"ppm-sc-repair-state", no_argument, 0, 'x'},
 		{0, 0, 0, 0}};
 
 	int op;
 	int long_index = 0;
 	while((op = getopt_long(argc, argv,
-				"hf:jab:mks:d:o:En:",
+				"hf:jab:mks:d:o:En:zx",
 				long_options, &long_index)) != -1)
 	{
 		switch(op)
@@ -163,6 +169,12 @@ void parse_CLI_options(sinsp& inspector, int argc, char** argv)
 		case 'n':
 			max_events = std::atol(optarg);
 			break;
+		case 'z':
+			ppm_sc_modifies_state = true;
+			break;
+		case 'x':
+			ppm_sc_repair_state = true;
+			break;
 		default:
 			break;
 		}
@@ -170,25 +182,50 @@ void parse_CLI_options(sinsp& inspector, int argc, char** argv)
 }
 #endif // _WIN32
 
-std::unordered_set<std::string> extract_filter_events(sinsp& inspector)
+libsinsp::events::set<ppm_sc_code> extract_filter_sc_codes(sinsp& inspector)
 {
 	auto ast = inspector.get_filter_ast();
 	if(ast != nullptr)
 	{
-		auto codes = libsinsp::filter::ast::ppm_event_codes(ast.get());
-		return libsinsp::events::event_set_to_names(codes);
+		return libsinsp::filter::ast::ppm_sc_codes(ast.get());
 	}
 
 	return {};
 }
 
-void open_engine(sinsp& inspector)
+void open_engine(sinsp& inspector, libsinsp::events::set<ppm_sc_code> events_sc_codes)
 {
 	std::cout << "-- Try to open: '" + engine_string + "' engine." << std::endl;
+	libsinsp::events::set<ppm_sc_code> ppm_sc; // empty set activaes each available ppm sc in the kernel
+
+	/* Select sc codes for active tracing in the kernel.
+	 * Include all ppm sc codes from filter AST.
+	 * Provide more e2e testing options.
+	 * Demonstrate ppm sc API usage.
+	 */
+	if (ppm_sc_repair_state && !events_sc_codes.empty())
+	{
+		ppm_sc = libsinsp::events::sinsp_repair_state_sc_set(events_sc_codes);
+		if (!ppm_sc.empty())
+		{
+			auto events_sc_names = libsinsp::events::sc_set_to_sc_names(ppm_sc);
+			printf("-- Activated ppm sc names in kernel using `sinsp_repair_state_sc_set` enforcement: %s\n", concat_set_in_order(events_sc_names).c_str());
+		}
+	}
+
+	if (ppm_sc_modifies_state && !events_sc_codes.empty())
+	{
+		ppm_sc = libsinsp::events::sinsp_state_sc_set().merge(events_sc_codes);
+		if (!ppm_sc.empty())
+		{
+			auto events_sc_names = libsinsp::events::sc_set_to_sc_names(ppm_sc);
+			printf("-- Activated ppm sc names in kernel using `sinsp_state_sc_set` enforcement: %s\n", concat_set_in_order(events_sc_names).c_str());
+		}
+	}
 
 	if(!engine_string.compare(KMOD_ENGINE))
 	{
-		inspector.open_kmod(buffer_bytes_dim);
+		inspector.open_kmod(buffer_bytes_dim, ppm_sc);
 	}
 	else if(!engine_string.compare(BPF_ENGINE))
 	{
@@ -201,7 +238,7 @@ void open_engine(sinsp& inspector)
 		{
 			std::cerr << bpf_path << std::endl;
 		}
-		inspector.open_bpf(bpf_path.c_str(), buffer_bytes_dim);
+		inspector.open_bpf(bpf_path.c_str(), buffer_bytes_dim, ppm_sc);
 	}
 	else if(!engine_string.compare(SAVEFILE_ENGINE))
 	{
@@ -214,7 +251,7 @@ void open_engine(sinsp& inspector)
 	}
 	else if(!engine_string.compare(MODERN_BPF_ENGINE))
 	{
-		inspector.open_modern_bpf(buffer_bytes_dim, DEFAULT_CPU_FOR_EACH_BUFFER, true);
+		inspector.open_modern_bpf(buffer_bytes_dim, DEFAULT_CPU_FOR_EACH_BUFFER, true, ppm_sc);
 	}
 	else
 	{
@@ -304,8 +341,6 @@ int main(int argc, char** argv)
 	signal(SIGINT, sigint_handler);
 	signal(SIGTERM, sigint_handler);
 
-	open_engine(inspector);
-
 	if(!filter_string.empty())
 	{
 		try
@@ -318,11 +353,14 @@ int main(int argc, char** argv)
 		}
 	}
 
-	auto event_names = extract_filter_events(inspector);
-	if(!event_names.empty())
+	auto events_sc_codes = extract_filter_sc_codes(inspector);
+	if(!events_sc_codes.empty())
 	{
-		printf("-- Filter event types names: %s\n", concat_set_in_order(event_names).c_str());
+		auto events_sc_names = libsinsp::events::sc_set_to_sc_names(events_sc_codes);
+		printf("-- Filter AST ppm sc names: %s\n", concat_set_in_order(events_sc_names).c_str());
 	}
+
+	open_engine(inspector, events_sc_codes);
 
 	std::cout << "-- Start capture" << std::endl;
 

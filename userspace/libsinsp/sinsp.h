@@ -963,7 +963,21 @@ public:
 	// to by filepath, and add it to the inspector.
 	// The created sinsp_plugin is returned.
 	std::shared_ptr<sinsp_plugin> register_plugin(const std::string& filepath);
-	const sinsp_plugin_manager* get_plugin_manager();
+
+	// Create and register a plugin given a custom API vtable.
+	// The passed-in api pointer will not be retained, its values will be copied
+	// internally.
+	std::shared_ptr<sinsp_plugin> register_plugin(const plugin_api* api);
+
+	inline std::shared_ptr<const sinsp_plugin_manager> get_plugin_manager() const
+	{
+		return m_plugin_manager;
+	}
+
+	inline const std::vector<std::string>& event_sources() const
+	{
+		return m_event_sources;
+	}
 
 	uint64_t get_lastevent_ts() const { return m_lastevent_ts; }
 
@@ -1263,12 +1277,15 @@ public:
 	//
 	// Internal manager for plugins
 	//
-	sinsp_plugin_manager* m_plugin_manager;
+	std::shared_ptr<sinsp_plugin_manager> m_plugin_manager;
+	//
+	// The event sources available in the inspector
+	std::vector<std::string> m_event_sources;
 	//
 	// The ID of the plugin to use as event input, or zero
 	// if no source plugin should be used as source
 	//
-	std::shared_ptr<sinsp_plugin_cap_sourcing> m_input_plugin;
+	std::shared_ptr<sinsp_plugin> m_input_plugin;
 	//
 	// String with the parameters for the plugin to be used as input.
 	// These parameters will be passed to the open function of the plugin.

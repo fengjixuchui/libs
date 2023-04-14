@@ -27,41 +27,27 @@ sinsp_filter_check_plugin::sinsp_filter_check_plugin()
 	m_info.m_nfields = 0;
 	m_info.m_flags = filter_check_info::FL_NONE;
 	m_eplugin = nullptr;
-	m_compatible_sources = NULL;
 }
 
 sinsp_filter_check_plugin::sinsp_filter_check_plugin(std::shared_ptr<sinsp_plugin> plugin)
 {
-	m_info.m_name = plugin->name() + string(" (plugin)");
 	if (!(plugin->caps() & CAP_EXTRACTION))
 	{
 		throw sinsp_exception("Creating a sinsp_filter_check_plugin with a non extraction-capable plugin.");
 	}
 
 	m_eplugin = plugin;
+	m_info.m_name = plugin->name() + string(" (plugin)");
 	m_info.m_fields = &m_eplugin->fields()[0]; // we use a vector so this should be safe
 	m_info.m_nfields = m_eplugin->fields().size();
 	m_info.m_flags = filter_check_info::FL_NONE;
-	m_compatible_sources = NULL;
 }
 
 sinsp_filter_check_plugin::sinsp_filter_check_plugin(const sinsp_filter_check_plugin &p)
 {
 	m_eplugin = p.m_eplugin;
-	m_compatible_sources = NULL;
-	if (p.m_compatible_sources)
-	{
-		m_compatible_sources = new std::set<size_t>(*p.m_compatible_sources);
-	}
 	m_info = p.m_info;
-}
-
-sinsp_filter_check_plugin::~sinsp_filter_check_plugin()
-{
-	if (m_compatible_sources)
-	{
-		delete m_compatible_sources;
-	}
+	m_compatible_plugin_sources_bitmap = p.m_compatible_plugin_sources_bitmap;
 }
 
 int32_t sinsp_filter_check_plugin::parse_field_name(const char* str, bool alloc_state, bool needed_for_filtering)
@@ -153,26 +139,27 @@ bool sinsp_filter_check_plugin::extract(sinsp_evt *evt, OUT vector<extract_value
 	// We know that plugin has source capabilities because it has an id and is sending events
 	// todo(jasondellaluce): remove this check once we do it properly at initialization time on the consumer side
 	bool pfound = false;
-	auto psource = m_inspector->get_plugin_manager()->source_idx_by_plugin_id(pgid, pfound);
+	auto srcidx = m_inspector->get_plugin_manager()->source_idx_by_plugin_id(pgid, pfound);
 	if (!pfound)
 	{
+		ASSERT(false);
 		return false;
 	}
-	if (!m_compatible_sources)
+
+	// lazily populate the compatibility bitmap
+	while (m_compatible_plugin_sources_bitmap.size() <= srcidx)
 	{
-		m_compatible_sources = new std::set<size_t>();
-		auto sources = m_inspector->get_plugin_manager()->sources();
-		for (auto &src : m_eplugin->extract_event_sources())
-		{
-			auto it = std::find(sources.begin(), sources.end(), src);
-			if (it != sources.end())
-			{
-				m_compatible_sources->insert(std::distance(sources.begin(), it));
-			}
-		}
+		auto src_idx = m_compatible_plugin_sources_bitmap.size();
+		m_compatible_plugin_sources_bitmap.push_back(false);
+		
+		ASSERT(src_idx < m_inspector->event_sources().size());
+		const auto& source = m_inspector->event_sources()[src_idx];
+		auto compatible = sinsp_plugin::is_source_compatible(m_eplugin->extract_event_sources(), source);
+		m_compatible_plugin_sources_bitmap[src_idx] = compatible;
 	}
-	if (!m_compatible_sources->empty()
-		&& m_compatible_sources->find(psource) == m_compatible_sources->end())
+
+	// the plugin is not compatible with the event's source
+	if (!m_compatible_plugin_sources_bitmap[srcidx])
 	{
 		return false;
 	}
@@ -210,16 +197,34 @@ bool sinsp_filter_check_plugin::extract(sinsp_evt *evt, OUT vector<extract_value
 		extract_value_t res;
 		switch(type)
 		{
+			case PT_UINT64:
+			case PT_RELTIME:
+			case PT_ABSTIME:
+			{
+				res.len = sizeof(uint64_t);
+				res.ptr = (uint8_t*) &efield.res.u64[i];
+				break;
+			}
+			// maybe these fields could use directly str instead buf
+			case PT_IPV4NET:
+			case PT_IPV6ADDR:
+			case PT_IPV6NET:
+			{
+				res.len = (uint32_t) efield.res.buf[i].len;
+				res.ptr = (uint8_t*) efield.res.buf[i].ptr;
+				break;
+			}
 			case PT_CHARBUF:
 			{
 				res.len = strlen(efield.res.str[i]);
 				res.ptr = (uint8_t*) efield.res.str[i];
 				break;
 			}
-			case PT_UINT64:
+			case PT_BOOL:
+			case PT_IPV4ADDR:
 			{
-				res.len = sizeof(uint64_t);
-				res.ptr = (uint8_t*) &efield.res.u64[i];
+				res.len = sizeof(uint32_t);
+				res.ptr = (uint8_t*) &efield.res.u32[i];
 				break;
 			}
 			default:

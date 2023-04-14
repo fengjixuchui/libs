@@ -39,6 +39,7 @@ limitations under the License.
 #include "filterchecks.h"
 #include "protodecoder.h"
 #include "strlcpy.h"
+#include "plugin_manager.h"
 
 #ifdef SIMULATE_DROP_MODE
 bool should_drop(sinsp_evt *evt);
@@ -55,7 +56,8 @@ extern sinsp_evttables g_infotables;
 sinsp_parser::sinsp_parser(sinsp *inspector) :
 	m_inspector(inspector),
 	m_tmp_evt(m_inspector),
-	m_fd_listener(NULL)
+	m_fd_listener(NULL),
+	m_syscall_event_source_idx(sinsp_no_event_source_idx)
 {
 	m_fake_userevt = (scap_evt*)m_fake_userevt_storage;
 
@@ -590,6 +592,57 @@ bool sinsp_parser::reset(sinsp_evt *evt)
 	else
 	{
 		evt->init();
+	}
+
+	if (evt->m_info->category & EC_PLUGIN)
+	{
+		// plugin events are produced by plugins of a certain ID, and have the
+		// event source specified by their producer plugin
+		if (evt->get_type() != PPME_PLUGINEVENT_E)
+		{
+			throw sinsp_exception("unknown plugin event type in sinsp parser: " + std::to_string(evt->get_type()));
+		}
+
+		bool pfound = false;
+		auto parinfo = evt->get_param(0);
+		ASSERT(parinfo->m_len == sizeof(int32_t));
+		uint32_t pgid = *(int32_t *) parinfo->m_val;
+		auto srcidx = m_inspector->get_plugin_manager()->source_idx_by_plugin_id(pgid, pfound);
+		if (!pfound)
+		{
+			evt->m_source_idx = sinsp_no_event_source_idx;
+			evt->m_source_name = sinsp_no_event_source_name;
+		}
+		else
+		{
+			evt->m_source_idx = srcidx;
+			evt->m_source_name = m_inspector->event_sources()[srcidx].c_str();
+		}
+	}
+	else
+	{
+		// every other event falls under the "syscall" event source umbrella
+		// cache index of "syscall" event source in case we haven't already
+		if (m_syscall_event_source_idx == sinsp_no_event_source_idx)
+		{
+			// note: the current inspector's implementation guarantees
+			// that the "syscall" event source is always at index 0, being
+			// the first one in the list. However we don't want to leak
+			// that knowledge down to this level, so we search for it
+			// in order to be resilient to future changes.
+			// The search happens only once.
+			for (size_t i = 0; i < m_inspector->event_sources().size(); i++)
+			{
+				if (m_inspector->event_sources()[i] == sinsp_syscall_event_source_name)
+				{
+					m_syscall_event_source_idx = i;
+					break;
+				}
+			}
+		}
+		evt->m_source_idx = m_syscall_event_source_idx;
+		evt->m_source_name = (m_syscall_event_source_idx != sinsp_no_event_source_idx)
+			? sinsp_syscall_event_source_name : sinsp_no_event_source_name;
 	}
 
 	ppm_event_flags eflags = evt->get_info_flags();

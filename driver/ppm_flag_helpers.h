@@ -23,6 +23,7 @@ or GPL2.txt for full copies of the license.
 #include <linux/ptrace.h>
 #include <linux/capability.h>
 #include <linux/eventpoll.h>
+#include <linux/prctl.h>
 #include "ppm.h"
 #ifdef __NR_io_uring_register
 #include <uapi/linux/io_uring.h>
@@ -2064,5 +2065,9 @@ static __always_inline uint32_t splice_flags_to_scap(uint32_t flags)
 #define PPM_OVERLAYFS_SUPER_MAGIC 0x794c7630
 #endif
 
+static __always_inline u32 prctl_options_to_scap(int options)
+{
+	return (u32)options;
+}
 
 #endif /* PPM_FLAG_HELPERS_H_ */
