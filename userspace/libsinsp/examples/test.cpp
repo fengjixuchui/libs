@@ -52,6 +52,7 @@ static const uint8_t g_backoff_timeout_secs = 2;
 static bool g_all_threads = false;
 static bool ppm_sc_modifies_state = false;
 static bool ppm_sc_repair_state = false;
+static bool ppm_sc_state_remove_io_sc = false;
 static bool json_dump_init_success = false;
 string engine_string = KMOD_ENGINE; /* Default for backward compatibility. */
 string filter_string = "";
@@ -94,8 +95,9 @@ Options:
   -o <fields>, --output-fields-json <fields> [JSON support only, can also use without -j] Output fields string (see <filter> for supported display fields) that overwrites JSON default output fields for all events. * at the beginning prints JSON keys with null values, else no null fields are printed.
   -E, --exclude-users                        Don't create the user/group tables
   -n, --num-events                           Number of events to be retrieved (no limit by default)
-  -z, --ppm-sc-modifies-state                Select ppm sc codes from filter AST plus enforce sinsp state ppm sc via `sinsp_state_sc_set`.
-  -x, --ppm-sc-repair-state                  Select ppm sc codes from filter AST plus enforce sinsp state ppm sc via `sinsp_repair_state_sc_set`.
+  -z, --ppm-sc-modifies-state                Select ppm sc codes from filter AST plus enforce sinsp state ppm sc codes via `sinsp_state_sc_set`, requires valid filter expression.
+  -x, --ppm-sc-repair-state                  Select ppm sc codes from filter AST plus enforce sinsp state ppm sc codes via `sinsp_repair_state_sc_set`, requires valid filter expression.
+  -q, --remove-io-sc-state                   Remove ppm sc codes belonging to `io_sc_set` from `sinsp_state_sc_set` sinsp state enforcement, defaults to false and only applies when choosing `-z` option, used for e2e testing of sinsp state.
 )";
 	cout << usage << endl;
 }
@@ -119,12 +121,13 @@ void parse_CLI_options(sinsp& inspector, int argc, char** argv)
 		{"num-events", required_argument, 0, 'n'},
 		{"ppm-sc-modifies-state", no_argument, 0, 'z'},
 		{"ppm-sc-repair-state", no_argument, 0, 'x'},
+		{"remove-io-sc-state", no_argument, 0, 'q'},
 		{0, 0, 0, 0}};
 
 	int op;
 	int long_index = 0;
 	while((op = getopt_long(argc, argv,
-				"hf:jab:mks:d:o:En:zx",
+				"hf:jab:mks:d:o:En:zxq",
 				long_options, &long_index)) != -1)
 	{
 		switch(op)
@@ -175,6 +178,9 @@ void parse_CLI_options(sinsp& inspector, int argc, char** argv)
 		case 'x':
 			ppm_sc_repair_state = true;
 			break;
+		case 'q':
+			ppm_sc_state_remove_io_sc = true;
+			break;
 		default:
 			break;
 		}
@@ -209,17 +215,25 @@ void open_engine(sinsp& inspector, libsinsp::events::set<ppm_sc_code> events_sc_
 		if (!ppm_sc.empty())
 		{
 			auto events_sc_names = libsinsp::events::sc_set_to_sc_names(ppm_sc);
-			printf("-- Activated ppm sc names in kernel using `sinsp_repair_state_sc_set` enforcement: %s\n", concat_set_in_order(events_sc_names).c_str());
+			printf("-- Activated (%ld) ppm sc names in kernel using `sinsp_repair_state_sc_set` enforcement: %s\n", events_sc_names.size(), concat_set_in_order(events_sc_names).c_str());
 		}
 	}
 
 	if (ppm_sc_modifies_state && !events_sc_codes.empty())
 	{
-		ppm_sc = libsinsp::events::sinsp_state_sc_set().merge(events_sc_codes);
+		ppm_sc = libsinsp::events::sinsp_state_sc_set();
+		if (ppm_sc_state_remove_io_sc)
+		{
+			/* Currently used for testing sinsp_state_sc_set() without I/O sc codes.
+			 * Approach may change in the future. */
+			ppm_sc = ppm_sc.diff(libsinsp::events::io_sc_set());
+
+		}
+		ppm_sc = ppm_sc.merge(events_sc_codes);
 		if (!ppm_sc.empty())
 		{
 			auto events_sc_names = libsinsp::events::sc_set_to_sc_names(ppm_sc);
-			printf("-- Activated ppm sc names in kernel using `sinsp_state_sc_set` enforcement: %s\n", concat_set_in_order(events_sc_names).c_str());
+			printf("-- Activated (%ld) ppm sc names in kernel using `sinsp_state_sc_set` enforcement: %s\n", events_sc_names.size(), concat_set_in_order(events_sc_names).c_str());
 		}
 	}
 
@@ -357,7 +371,7 @@ int main(int argc, char** argv)
 	if(!events_sc_codes.empty())
 	{
 		auto events_sc_names = libsinsp::events::sc_set_to_sc_names(events_sc_codes);
-		printf("-- Filter AST ppm sc names: %s\n", concat_set_in_order(events_sc_names).c_str());
+		printf("-- Filter AST (%ld) ppm sc names: %s\n", events_sc_codes.size(), concat_set_in_order(events_sc_names).c_str());
 	}
 
 	open_engine(inspector, events_sc_codes);
