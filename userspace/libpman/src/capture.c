@@ -18,6 +18,8 @@ limitations under the License.
 #include "state.h"
 #include <libpman.h> // before including scap so that handle_ppm_sc_mask() is not built
 #include <scap.h>
+#include "strlcpy.h"
+#include "../libscap/engine/modern_bpf/scap_modern_bpf_stats.h"
 
 /* This function should be idempotent, every time it is called it should enforce again the state */
 int pman_enforce_sc_set(bool *sc_set)
@@ -162,7 +164,7 @@ int pman_get_scap_stats(void *scap_stats_struct)
 	{
 		if(bpf_map_lookup_elem(counter_maps_fd, &index, &cnt_map) < 0)
 		{
-			snprintf(error_message, MAX_ERROR_MESSAGE_LEN, "unbale to get the counter map for CPU %d", index);
+			snprintf(error_message, MAX_ERROR_MESSAGE_LEN, "unable to get the counter map for CPU %d", index);
 			pman_print_error((const char *)error_message);
 			goto clean_print_stats;
 		}
@@ -176,6 +178,60 @@ int pman_get_scap_stats(void *scap_stats_struct)
 clean_print_stats:
 	close(counter_maps_fd);
 	return errno;
+}
+
+int pman_get_scap_stats_v2(void* scap_stats_v2_struct, uint32_t flags, uint32_t* nstats)
+{
+	struct scap_stats_v2 *stats = (struct scap_stats_v2 *)scap_stats_v2_struct;
+	*nstats = 0;
+	int ret;
+	if (!stats)
+	{
+		pman_print_error("pointer to scap_stats_v2 is empty");
+		return SCAP_FAILURE;
+	}
+
+	if ((flags & PPM_SCAP_STATS_KERNEL_COUNTERS))
+	{
+		char error_message[MAX_ERROR_MESSAGE_LEN];
+		struct counter_map cnt_map;
+		int counter_maps_fd = bpf_map__fd(g_state.skel->maps.counter_maps);
+		if(counter_maps_fd <= 0)
+		{
+			pman_print_error("unable to get counter maps");
+			return SCAP_FAILURE;
+		}
+
+		/* We always take statistics from all the CPUs, even if some of them are not online.
+		* If the CPU is not online the counter map will be empty.
+		*/
+		for(uint32_t stat = 0; stat < MODERN_BPF_MAX_KERNEL_COUNTERS_STATS; stat++)
+		{
+			stats[stat].type = STATS_VALUE_TYPE_U64;
+			stats[stat].flags = PPM_SCAP_STATS_KERNEL_COUNTERS;
+			stats[stat].value.u64 = 0;
+			strlcpy(stats[stat].name, modern_bpf_kernel_counters_stats_names[stat], STATS_NAME_MAX);
+		}
+
+		for(uint32_t index = 0; index < g_state.n_possible_cpus; index++)
+		{
+			if((ret = bpf_map_lookup_elem(counter_maps_fd, &index, &cnt_map)) != 0)
+			{
+				snprintf(error_message, MAX_ERROR_MESSAGE_LEN, "unable to get the counter map for CPU %d", index);
+				pman_print_error((const char *)error_message);
+				close(counter_maps_fd);
+				return -ret;
+			}
+			stats[MODERN_BPF_N_EVTS].value.u64 += cnt_map.n_evts;
+			stats[MODERN_BPF_N_DROPS_BUFFER_TOTAL].value.u64 += cnt_map.n_drops_buffer;
+			stats[MODERN_BPF_N_DROPS_SCRATCH_MAP].value.u64 += cnt_map.n_drops_max_event_size;
+			stats[MODERN_BPF_N_DROPS].value.u64 += (cnt_map.n_drops_buffer + cnt_map.n_drops_max_event_size);
+		}
+		close(counter_maps_fd);
+		// todo @incertum add libbpf stats for modern_bpf
+		*nstats = MODERN_BPF_MAX_KERNEL_COUNTERS_STATS;
+	}
+	return SCAP_SUCCESS;
 }
 
 int pman_get_n_tracepoint_hit(long *n_events_per_cpu)

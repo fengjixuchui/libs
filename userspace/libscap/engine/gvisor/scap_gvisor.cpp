@@ -32,6 +32,7 @@ limitations under the License.
 #include "pkg/sentry/seccheck/points/common.pb.h"
 
 #include "strlcpy.h"
+#include "scap_gvisor_stats.h"
 
 namespace scap_gvisor {
 
@@ -42,6 +43,13 @@ constexpr size_t max_message_size = 300 * 1024;
 constexpr size_t initial_event_buffer_size = 32;
 constexpr int listen_backlog_size = 128;
 const std::string default_root_path = "/var/run/docker/runtime-runc/moby";
+
+static const char * const gvisor_counters_stats_names[] = {
+	[scap_gvisor::stats::GVISOR_N_EVTS] = "n_evts",
+	[scap_gvisor::stats::GVISOR_N_DROPS_BUG] = "n_drops_bug",
+	[scap_gvisor::stats::GVISOR_N_DROPS_BUFFER_TOTAL] ="n_drops_buffer_total",
+	[scap_gvisor::stats::GVISOR_N_DROPS] = "n_drops",
+};
 
 sandbox_entry::sandbox_entry()
 {
@@ -447,6 +455,33 @@ int32_t engine::get_stats(scap_stats *stats)
 	stats->n_drops_buffer = m_gvisor_stats.n_drops_gvisor;
 	stats->n_evts = m_gvisor_stats.n_evts;
 	return SCAP_SUCCESS;
+}
+
+const struct scap_stats_v2* engine::get_stats_v2(uint32_t flags, uint32_t* nstats, int32_t* rc)
+{
+	*nstats = scap_gvisor::stats::MAX_GVISOR_COUNTERS_STATS;
+	scap_stats_v2* stats = engine::m_stats;
+	if (!stats)
+	{
+		*nstats = 0;
+		*rc = SCAP_FAILURE;
+		return NULL;
+	}
+
+	/* GVISOR STATS COUNTERS */
+	for(uint32_t stat = 0; stat < scap_gvisor::stats::MAX_GVISOR_COUNTERS_STATS; stat++)
+	{
+		stats[stat].type = STATS_VALUE_TYPE_U64;
+		stats[stat].value.u64 = 0;
+		strlcpy(stats[stat].name, gvisor_counters_stats_names[stat], STATS_NAME_MAX);
+	}
+	stats[scap_gvisor::stats::GVISOR_N_EVTS].value.u64 = m_gvisor_stats.n_evts;
+	stats[scap_gvisor::stats::GVISOR_N_DROPS_BUG].value.u64 = m_gvisor_stats.n_drops_parsing;
+	stats[scap_gvisor::stats::GVISOR_N_DROPS_BUFFER_TOTAL].value.u64 = m_gvisor_stats.n_drops_parsing + m_gvisor_stats.n_drops_gvisor;
+	stats[scap_gvisor::stats::GVISOR_N_DROPS].value.u64 = m_gvisor_stats.n_drops_gvisor;
+
+	*rc = SCAP_SUCCESS;
+	return stats;
 }
 
 // Reads one gvisor message from the specified fd, stores the resulting events overwriting m_buffers and adds pointers to m_event_queue.

@@ -18,6 +18,7 @@ limitations under the License.
 #pragma once
 
 #include "scap_const.h"
+#include "scap_stats_v2.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -115,7 +116,6 @@ typedef struct ppm_evt_hdr scap_evt;
 // that no progress logging should be performed
 //
 #define SCAP_PROC_SCAN_LOG_NONE 0
-
 
 /*!
   \brief Statistics about an in progress capture
@@ -719,6 +719,18 @@ scap_threadinfo* scap_get_proc_table(scap_t* handle);
    the cause of the error.
 */
 int32_t scap_get_stats(scap_t* handle, OUT scap_stats* stats);
+
+/*!
+  \brief Get engine statistics (including counters and `bpftool prog show` like stats)
+
+  \param handle Handle to the capture instance.
+  \param flags holding statistics category flags.
+  \param nstats Pointer reflecting number of statistics in returned buffer.
+  \param rc Pointer to return code.
+
+  \return Pointer to a \ref scap_stats_v2 structure filled with the statistics.
+*/
+const struct scap_stats_v2* scap_get_stats_v2(scap_t* handle, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc);
 
 /*!
   \brief Returns the set of ppm_sc whose events have EF_MODIFIES_STATE flag or whose syscall have UF_NEVER_DROP flag.

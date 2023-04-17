@@ -28,6 +28,10 @@ limitations under the License.
 #include "strlcpy.h"
 #include "gettimeofday.h"
 
+static const char * const source_plugin_counters_stats_names[] = {
+	[N_EVTS] = "n_evts",
+};
+
 static int32_t plugin_rc_to_scap_rc(ss_plugin_rc plugin_rc)
 {
 	switch(plugin_rc)
@@ -229,6 +233,31 @@ static int32_t get_stats(struct scap_engine_handle engine, OUT scap_stats* stats
 	return SCAP_SUCCESS;
 }
 
+const struct scap_stats_v2* get_source_plugin_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
+{
+	struct source_plugin_engine *handle = engine.m_handle;
+	*nstats = MAX_SOURCE_PLUGIN_COUNTERS_STATS;
+	scap_stats_v2* stats = handle->m_stats;
+	if (!stats)
+	{
+		*nstats = 0;
+		*rc = SCAP_FAILURE;
+		return NULL;
+	}
+
+	/* SOURCE PLUGIN STATS COUNTERS */
+	for(uint32_t stat = 0; stat < MAX_SOURCE_PLUGIN_COUNTERS_STATS; stat++)
+	{
+		stats[stat].type = STATS_VALUE_TYPE_U64;
+		stats[stat].value.u64 = 0;
+		strlcpy(stats[stat].name, source_plugin_counters_stats_names[stat], STATS_NAME_MAX);
+	}
+	stats[N_EVTS].value.u64 = handle->m_nevts;
+
+	*rc = SCAP_SUCCESS;
+	return stats;
+}
+
 const struct scap_vtable scap_source_plugin_engine = {
 	.name = SOURCE_PLUGIN_ENGINE,
 	.mode = SCAP_MODE_PLUGIN,
@@ -243,6 +272,7 @@ const struct scap_vtable scap_source_plugin_engine = {
 	.stop_capture = noop_stop_capture,
 	.configure = noop_configure,
 	.get_stats = get_stats,
+	.get_stats_v2 = get_source_plugin_stats_v2,
 	.get_n_tracepoint_hit = noop_get_n_tracepoint_hit,
 	.get_n_devs = noop_get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,

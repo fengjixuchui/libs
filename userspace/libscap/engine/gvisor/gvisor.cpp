@@ -33,6 +33,8 @@ namespace scap_gvisor {
 #include <sys/un.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
+#include <stdint.h>
+#include <utility>
 
 #include "strlcpy.h"
 
@@ -85,6 +87,11 @@ static int32_t gvisor_configure(struct scap_engine_handle engine, enum scap_sett
 static int32_t gvisor_get_stats(struct scap_engine_handle engine, scap_stats* stats)
 {
 	return engine.m_handle->get_stats(stats);
+}
+
+static const struct scap_stats_v2* gvisor_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, uint32_t* nstats, int32_t* rc)
+{
+	return engine.m_handle->get_stats_v2(flags, nstats, rc);
 }
 
 static int32_t gvisor_get_n_tracepoint_hit(struct scap_engine_handle engine, long* ret)
@@ -159,6 +166,7 @@ extern const struct scap_vtable scap_gvisor_engine = {
 	.stop_capture = gvisor_stop_capture,
 	.configure = gvisor_configure,
 	.get_stats = gvisor_get_stats,
+	.get_stats_v2 = gvisor_get_stats_v2,
 	.get_n_tracepoint_hit = gvisor_get_n_tracepoint_hit,
 	.get_n_devs = gvisor_get_n_devs,
 	.get_max_buf_used = gvisor_get_max_buf_used,

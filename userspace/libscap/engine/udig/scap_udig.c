@@ -586,6 +586,7 @@ const struct scap_vtable scap_udig_engine = {
 	.stop_capture = stop_capture,
 	.configure = configure,
 	.get_stats = get_stats,
+	.get_stats_v2 = noop_get_stats_v2,
 	.get_n_tracepoint_hit = get_n_tracepoint_hit,
 	.get_n_devs = get_n_devs,
 	.get_max_buf_used = get_max_buf_used,

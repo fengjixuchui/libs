@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <stdint.h>
 #include "plugin_info.h"
+#include "source_plugin_stats.h"
+#include "scap_stats_v2.h"
 
 struct scap;
 
@@ -46,5 +48,8 @@ struct source_plugin_engine
 
 	// The return value from the last call to next_batch().
 	ss_plugin_rc m_input_plugin_last_batch_res;
+
+	// Stats v2.
+	scap_stats_v2 m_stats[MAX_SOURCE_PLUGIN_COUNTERS_STATS];
 
 };

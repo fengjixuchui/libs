@@ -293,6 +293,17 @@ extern "C"
 	int pman_get_scap_stats(void* scap_stats_struct);
 
 	/**
+	 * @brief Get scap_stats_v2 structure filled with the statistics.
+	 *
+	 * @param scap_stats_v2_struct opaque pointer to `struct scap_stats_v2` held in modern_bpf_engine handle
+	 * @param flags holding statistics category flags.
+	 * @param nstats Pointer reflecting number of statistics in returned buffer.
+	 *
+	 * @return `0` on success, `errno` in case of error.
+	 */
+	int pman_get_scap_stats_v2(void* scap_stats_v2_struct, uint32_t flags, uint32_t* nstats);
+
+	/**
 	 * @brief Receive an array with `nCPUs` elements. For every CPU
 	 * we set the number of events caught.
 	 *

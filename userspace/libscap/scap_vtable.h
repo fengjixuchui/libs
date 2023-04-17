@@ -28,6 +28,7 @@ extern "C" {
 
 struct scap_stats;
 typedef struct scap scap_t;
+struct scap_stats_v2;
 typedef struct ppm_evt_hdr scap_evt;
 
 enum scap_ppm_sc_mask_op {
@@ -217,6 +218,15 @@ struct scap_vtable {
 	 * @return SCAP_SUCCESS or a failure code
 	 */
 	int32_t (*get_stats)(struct scap_engine_handle engine, struct scap_stats *stats);
+
+	/**
+	 * @brief get engine statistics (including counters and `bpftool prog show` like stats)
+	 * @param flags holding statistics category flags
+	 * @param nstats Pointer reflecting number of statistics in returned buffer
+	 * @param rc Pointer to return code
+	 * @return Pointer to a \ref scap_stats_v2 structure filled with the statistics
+	 */
+	const struct scap_stats_v2* (*get_stats_v2)(struct scap_engine_handle engine, uint32_t flags, uint32_t* nstats, int32_t* rc);
 
 	/**
 	 * @brief get the number of tracepoint hits

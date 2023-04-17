@@ -29,6 +29,13 @@ limitations under the License.
 #include <sys/utsname.h>
 #include "ringbuffer/ringbuffer.h"
 
+const char * const modern_bpf_kernel_counters_stats_names[] = {
+	[MODERN_BPF_N_EVTS] = "n_evts",
+	[MODERN_BPF_N_DROPS_BUFFER_TOTAL] = "n_drops_buffer_total",
+	[MODERN_BPF_N_DROPS_SCRATCH_MAP] = "n_drops_scratch_map",
+	[MODERN_BPF_N_DROPS] = "n_drops",
+};
+
 static struct modern_bpf_engine* scap_modern_bpf__alloc_engine(scap_t* main_handle, char* lasterr_ptr)
 {
 	struct modern_bpf_engine* engine = calloc(1, sizeof(struct modern_bpf_engine));
@@ -245,6 +252,17 @@ int32_t scap_modern_bpf__get_stats(struct scap_engine_handle engine, OUT scap_st
 	return SCAP_SUCCESS;
 }
 
+const struct scap_stats_v2* scap_modern_bpf__get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
+{
+	*rc = SCAP_SUCCESS;
+	if(pman_get_scap_stats_v2((void*)engine.m_handle->m_stats, flags, (void*)nstats))
+	{
+		*rc = SCAP_FAILURE;
+		return NULL;
+	}
+	return engine.m_handle->m_stats;
+}
+
 int32_t scap_modern_bpf__get_n_tracepoint_hit(struct scap_engine_handle engine, OUT long* ret)
 {
 	if(pman_get_n_tracepoint_hit(ret))
@@ -278,6 +296,7 @@ struct scap_vtable scap_modern_bpf_engine = {
 	.stop_capture = scap_modern_bpf__stop_capture,
 	.configure = scap_modern_bpf__configure,
 	.get_stats = scap_modern_bpf__get_stats,
+	.get_stats_v2 = scap_modern_bpf__get_stats_v2,
 	.get_n_tracepoint_hit = scap_modern_bpf__get_n_tracepoint_hit,
 	.get_n_devs = scap_modern_bpf__get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,

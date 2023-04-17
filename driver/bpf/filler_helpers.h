@@ -25,6 +25,9 @@ or GPL2.txt for full copies of the license.
 #define MAX_PATH_COMPONENTS 16
 #define MAX_PATH_LENGTH 4096
 
+/* Helper used to please the verifier with operations on the number of arguments */
+#define SAFE_ARG_NUMBER(x) x & (PPM_MAX_EVENT_PARAMS - 1)
+
 /* This enum is used to tell our helpers if they have to
  * read from kernel or user memory.
  */
@@ -1065,18 +1068,12 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 
 static __always_inline int bpf_push_empty_param(struct filler_data *data)
 {
-	/* This is not so necessary but just keep it for compliance with other helpers */
-	if (data->state->tail_ctx.curarg >= PPM_MAX_EVENT_PARAMS) {
-		bpf_printk("invalid curarg: %d\n", data->state->tail_ctx.curarg);
-		return PPM_FAILURE_BUG;
-	}
-
 	/* We push 0 in the length array */
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, 0);
 	data->curarg_already_on_frame = false;
 
-	 /* We increment the current argument - to make verifier happy, properly check it against u32 max */
-	data->state->tail_ctx.curarg = (data->state->tail_ctx.curarg + 1) & (PPM_MAX_EVENT_PARAMS - 1);
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
 	return PPM_SUCCESS;
 }
 
@@ -1129,14 +1126,15 @@ static __always_inline int bpf_push_s64_to_ring(struct filler_data *data, s64 va
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	unsigned int len = sizeof(s64);
+	const unsigned int len = sizeof(s64);
 	*((s64 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	/// TODO: @Andreagit97 this could be simplified
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
 	data->curarg_already_on_frame = false;
-	++data->state->tail_ctx.curarg;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
 	return PPM_SUCCESS;
 }
 
@@ -1146,13 +1144,14 @@ static __always_inline int bpf_push_u64_to_ring(struct filler_data *data, u64 va
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	unsigned int len = sizeof(u64);
+	const unsigned int len = sizeof(u64);
 	*((u64 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
 	data->curarg_already_on_frame = false;
-	++data->state->tail_ctx.curarg;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
 	return PPM_SUCCESS;
 }
 
@@ -1162,13 +1161,99 @@ static __always_inline int bpf_push_u32_to_ring(struct filler_data *data, u32 va
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	unsigned int len = sizeof(u32);
+	const unsigned int len = sizeof(u32);
 	*((u32 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
 	data->curarg_already_on_frame = false;
-	++data->state->tail_ctx.curarg;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
+	return PPM_SUCCESS;
+}
+
+static __always_inline int bpf_push_s32_to_ring(struct filler_data *data, s32 val)
+{
+	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
+	{
+		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
+	}
+	const unsigned int len = sizeof(s32);
+	*((s32 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
+	data->state->tail_ctx.curoff += len;
+	data->state->tail_ctx.len += len;
+	data->curarg_already_on_frame = false;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
+	return PPM_SUCCESS;
+}
+
+static __always_inline int bpf_push_u16_to_ring(struct filler_data *data, u16 val)
+{
+	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
+	{
+		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
+	}
+	const unsigned int len = sizeof(u16);
+	*((u16 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
+	data->state->tail_ctx.curoff += len;
+	data->state->tail_ctx.len += len;
+	data->curarg_already_on_frame = false;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
+	return PPM_SUCCESS;
+}
+
+static __always_inline int bpf_push_s16_to_ring(struct filler_data *data, s16 val)
+{
+	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
+	{
+		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
+	}
+	const unsigned int len = sizeof(s16);
+	*((s16 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
+	data->state->tail_ctx.curoff += len;
+	data->state->tail_ctx.len += len;
+	data->curarg_already_on_frame = false;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
+	return PPM_SUCCESS;
+}
+
+static __always_inline int bpf_push_u8_to_ring(struct filler_data *data, u8 val)
+{
+	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
+	{
+		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
+	}
+	const unsigned int len = sizeof(u8);
+	*((u8 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
+	data->state->tail_ctx.curoff += len;
+	data->state->tail_ctx.len += len;
+	data->curarg_already_on_frame = false;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
+	return PPM_SUCCESS;
+}
+
+static __always_inline int bpf_push_s8_to_ring(struct filler_data *data, s16 val)
+{
+	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
+	{
+		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
+	}
+	const unsigned int len = sizeof(s8);
+	*((s8 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
+	data->state->tail_ctx.curoff += len;
+	data->state->tail_ctx.len += len;
+	data->curarg_already_on_frame = false;
+	/* We increment the current argument - to make verifier happy, properly check it */
+	data->state->tail_ctx.curarg = SAFE_ARG_NUMBER(data->state->tail_ctx.curarg + 1);
 	return PPM_SUCCESS;
 }
 
@@ -1177,6 +1262,7 @@ static __always_inline int bpf_val_to_ring(struct filler_data *data,
 {
 	const struct ppm_param_info *param_info;
 
+	/// TODO this is something we want to enforce at test time, not runtime
 	if (data->state->tail_ctx.curarg >= PPM_MAX_EVENT_PARAMS) {
 		bpf_printk("invalid curarg: %d\n", data->state->tail_ctx.curarg);
 		return PPM_FAILURE_BUG;

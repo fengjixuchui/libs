@@ -240,7 +240,7 @@ void enable_single_ppm_sc(int ppm_sc_code)
 
 void enable_sc_and_print()
 {
-	printf("---------------------- INTERESTING SYSCALLS ----------------------\n");
+	printf("\n---------------------- INTERESTING SYSCALLS ----------------------\n");
 	if(ppm_sc_is_set)
 	{
 		printf("* sc codes enabled:\n");
@@ -524,7 +524,7 @@ void print_event(scap_evt* ev)
 
 void print_help()
 {
-	printf("\n----------------------- MENU -----------------------\n");
+	printf("\n------------------------------ MENU ------------------------------\n");
 	printf("------> SCAP SOURCES\n");
 	printf("'%s': enable the kernel module.\n", KMOD_OPTION);
 	printf("'%s <probe_path>': enable the BPF probe.\n", BPF_OPTION);
@@ -542,12 +542,12 @@ void print_help()
 	printf("\n------> PRINT OPTIONS\n");
 	printf("'%s': print all supported syscalls with different sources and configurations.\n", PRINT_SYSCALLS_OPTION);
 	printf("'%s': print this menu.\n", PRINT_HELP_OPTION);
-	printf("-----------------------------------------------------\n");
+	printf("\n------------------------------------------------------------------\n\n");
 }
 
 void print_scap_source()
 {
-	printf("\n---------------------- SCAP SOURCE ----------------------\n");
+	printf("\n--------------------------- SCAP SOURCE --------------------------\n");
 	if(strcmp(oargs.engine_name, KMOD_ENGINE) == 0)
 	{
 		printf("* Kernel module.\n");
@@ -573,15 +573,15 @@ void print_scap_source()
 		print_help();
 		exit(EXIT_FAILURE);
 	}
-	printf("-----------------------------------------------------------\n\n");
+	printf("------------------------------------------------------------------\n\n");
 }
 
 void print_configurations()
 {
-	printf("--------------------- CONFIGURATIONS ----------------------\n");
+	printf("\n------------------------- CONFIGURATIONS -------------------------\n");
 	printf("* Print single event type: %d (`-1` means no event to print).\n", evt_type);
 	printf("* Run until '%lu' events are catched.\n", num_events);
-	printf("-----------------------------------------------------------\n\n");
+	printf("------------------------------------------------------------------\n\n");
 }
 
 void print_start_capture()
@@ -760,40 +760,65 @@ void print_stats()
 {
 	gettimeofday(&tval_end, NULL);
 	timersub(&tval_end, &tval_start, &tval_result);
+	uint32_t flags = PPM_SCAP_STATS_KERNEL_COUNTERS | PPM_SCAP_STATS_LIBBPF_STATS;
+	uint32_t nstats;
+	int32_t rc;
+	const scap_stats_v2* stats_v2;
+	stats_v2 = scap_get_stats_v2(g_h, flags, &nstats, &rc);
+	const scap_machine_info* scap_machine_info = scap_get_machine_info(g_h);
+	uint64_t n_evts = 0;
+	if (stats_v2 && nstats > 0)
+	{
+		for(int stat = 0; stat < nstats; stat++)
+		{
+			if ((strncmp(stats_v2[stat].name, "n_evts", 6) == 0) && stats_v2[0].type == STATS_VALUE_TYPE_U64)
+			{
+				n_evts = stats_v2[stat].value.u64;
+				break;
+			}
+		}
+	}
 
-	scap_stats s;
-	printf("\n---------------------- STATS -----------------------\n");
-	printf("Events correctly captured (SCAP_SUCCESS): %" PRIu64 "\n", g_nevts);
-	scap_get_stats(g_h, &s);
-	printf("Seen by driver: %" PRIu64 "\n", s.n_evts);
+	printf("\n----------------------------- STATS ------------------------------\n");
+
+	printf("\n[SCAP-OPEN]: General statistics\n");
+	printf("\nEvents correctly captured (SCAP_SUCCESS): %" PRIu64 "\n", g_nevts);
+	printf("Seen by driver (kernel side events): %" PRIu64 "\n", n_evts);
 	printf("Time elapsed: %ld s\n", tval_result.tv_sec);
 	if(tval_result.tv_sec != 0)
 	{
-		printf("Number of events/per-second: %ld\n", g_nevts / tval_result.tv_sec);
+		printf("Rate of userspace events (events/second): %ld\n", g_nevts / tval_result.tv_sec);
+		printf("Rate of kernel side events (events/second): %ld\n", n_evts / tval_result.tv_sec);
 	}
-	printf("Number of dropped events: %" PRIu64 "\n", s.n_drops);
 	printf("Number of timeouts: %ld\n", number_of_timeouts);
 	printf("Number of 'next' calls: %ld\n", number_of_scap_next);
-	printf("Number of dropped events caused by full buffer (total / all buffer drops - includes all categories below, likely higher than sum of syscall categories): %" PRIu64 "\n", s.n_drops_buffer);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_clone_fork_enter syscall category): %" PRIu64 "\n", s.n_drops_buffer_clone_fork_enter);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_clone_fork_exit syscall category): %" PRIu64 "\n", s.n_drops_buffer_clone_fork_exit);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_execve_enter syscall category): %" PRIu64 "\n", s.n_drops_buffer_execve_enter);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_execve_exit syscall category): %" PRIu64 "\n", s.n_drops_buffer_execve_exit);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_connect_enter syscall category): %" PRIu64 "\n", s.n_drops_buffer_connect_enter);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_connect_exit syscall category): %" PRIu64 "\n", s.n_drops_buffer_connect_exit);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_open_enter syscall category): %" PRIu64 "\n", s.n_drops_buffer_open_enter);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_open_exit syscall category): %" PRIu64 "\n", s.n_drops_buffer_open_exit);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_dir_file_enter syscall category): %" PRIu64 "\n", s.n_drops_buffer_dir_file_enter);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_dir_file_exit syscall category): %" PRIu64 "\n", s.n_drops_buffer_dir_file_exit);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_other_interest_enter syscall category): %" PRIu64 "\n", s.n_drops_buffer_other_interest_enter);
-	printf("Number of dropped events caused by full buffer (n_drops_buffer_other_interest_exit syscall category): %" PRIu64 "\n", s.n_drops_buffer_other_interest_exit);
-	printf("Number of dropped events caused by full scratch map: %" PRIu64 "\n", s.n_drops_scratch_map);
-	printf("Number of dropped events caused by invalid memory access (page faults): %" PRIu64 "\n", s.n_drops_pf);
-	printf("Number of dropped events caused by an invalid condition in the kernel instrumentation (bug): %" PRIu64 "\n", s.n_drops_bug);
-	printf("Number of preemptions: %" PRIu64 "\n", s.n_preemptions);
-	printf("Number of events skipped due to the tid being in a set of suppressed tids: %" PRIu64 "\n", s.n_suppressed);
-	printf("Number of threads currently being suppressed: %" PRIu64 "\n", s.n_tids_suppressed);
-	printf("-----------------------------------------------------\n");
+
+	printf("\n[SCAP-OPEN]: Stats v2.\n");
+	printf("\n[SCAP-OPEN]: %u metrics in total\n", nstats);
+	if((strncmp(oargs.engine_name, BPF_ENGINE, 3) == 0) || (strncmp(oargs.engine_name, MODERN_BPF_ENGINE, 10) == 0))
+	{
+		printf("[SCAP-OPEN]: [1] kernel-side counters\n");
+		printf("[SCAP-OPEN]: [2] libbpf stats (compare to `bpftool prog show` CLI)\n\n");
+		if (!(scap_machine_info->flags & PPM_BPF_STATS_ENABLED))
+		{
+			printf("\n[Notice]: `/proc/sys/kernel/bpf_stats_enabled` not enabled, no `libbpf` stats retrieved.\n\n");
+		}
+	}
+	else
+	{
+		printf("[SCAP-OPEN]: [1] kernel-side counters.\n\n");
+	}
+	if (stats_v2 && nstats > 0)
+	{
+		for(int stat = 0; stat < nstats; stat++)
+		{
+			if (stats_v2[stat].type == STATS_VALUE_TYPE_U64)
+			{
+				printf("[%u] %s: %lu\n", stats_v2[stat].flags, stats_v2[stat].name, stats_v2[stat].value.u64);
+			}
+		}
+	}
+	printf("\n\n------------------------------------------------------------------\n\n");
 	printf("\n[SCAP-OPEN]: Bye!\n");
 }
 

@@ -30,6 +30,7 @@ limitations under the License.
 #include <ctype.h>
 #include <time.h>
 #include <dirent.h>
+#include "strlcpy.h"
 
 #define SCAP_HANDLE_T struct bpf_engine
 
@@ -47,6 +48,33 @@ limitations under the License.
 #include "strlcpy.h"
 #include "noop.h"
 #include "strerror.h"
+
+static const char * const bpf_kernel_counters_stats_names[] = {
+	[BPF_N_EVTS] = "n_evts",
+	[BPF_N_DROPS_BUFFER_TOTAL] = "n_drops_buffer_total",
+	[BPF_N_DROPS_BUFFER_CLONE_FORK_ENTER] = "n_drops_buffer_clone_fork_enter",
+	[BPF_N_DROPS_BUFFER_CLONE_FORK_EXIT] = "n_drops_buffer_clone_fork_exit",
+	[BPF_N_DROPS_BUFFER_EXECVE_ENTER] = "n_drops_buffer_execve_enter",
+	[BPF_N_DROPS_BUFFER_EXECVE_EXIT] = "n_drops_buffer_execve_exit",
+	[BPF_N_DROPS_BUFFER_CONNECT_ENTER] = "n_drops_buffer_connect_enter",
+	[BPF_N_DROPS_BUFFER_CONNECT_EXIT] = "n_drops_buffer_connect_exit",
+	[BPF_N_DROPS_BUFFER_OPEN_ENTER] = "n_drops_buffer_open_enter",
+	[BPF_N_DROPS_BUFFER_OPEN_EXIT] = "n_drops_buffer_open_exit",
+	[BPF_N_DROPS_BUFFER_DIR_FILE_ENTER] = "n_drops_buffer_dir_file_enter",
+	[BPF_N_DROPS_BUFFER_DIR_FILE_EXIT] = "n_drops_buffer_dir_file_exit",
+	[BPF_N_DROPS_BUFFER_OTHER_INTEREST_ENTER] = "n_drops_buffer_other_interest_enter",
+	[BPF_N_DROPS_BUFFER_OTHER_INTEREST_EXIT] = "n_drops_buffer_other_interest_exit",
+	[BPF_N_DROPS_SCRATCH_MAP] = "n_drops_scratch_map",
+	[BPF_N_DROPS_PAGE_FAULTS] = "n_drops_page_faults",
+	[BPF_N_DROPS_BUG] = "n_drops_bug",
+	[BPF_N_DROPS] = "n_drops",
+};
+
+static const char * const bpf_libbpf_stats_names[] = {
+	[RUN_CNT] = ".run_cnt", ///< `bpf_prog_info` run_cnt.
+	[RUN_TIME_NS] = ".run_time_ns", ///<`bpf_prog_info` run_time_ns.
+	[AVG_TIME_NS] = ".avg_time_ns", ///< Average time spent in bpg program, calculation: run_time_ns / run_cnt.
+};
 
 static inline scap_evt* scap_bpf_next_event(scap_device* dev)
 {
@@ -135,6 +163,11 @@ static int sys_perf_event_open(struct perf_event_attr *attr,
 	return syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
 }
 
+static inline __u64 ptr_to_u64(const void *ptr)
+{
+	return (__u64) (unsigned long) ptr;
+}
+
 /* Here the filler_name is something like 'sys_open_x'.
  * Starting from the entire section name 'raw_tracepoint/filler/sys_open_x'
  * here we obtain just the final part 'sys_open_x'.
@@ -211,6 +244,22 @@ static int bpf_map_freeze(int fd)
 
 	/* Do not check for errors as BPF_MAP_FREEZE was introduced in kernel 5.2 */
 	sys_bpf(BPF_MAP_FREEZE, &attr, sizeof(attr));
+	return SCAP_SUCCESS;
+}
+
+static int bpf_obj_get_info_by_fd(int fd, void *info, __u32 *info_len)
+{
+	union bpf_attr attr;
+	int err;
+
+	bzero(&attr, sizeof(attr));
+	attr.info.bpf_fd = fd;
+	attr.info.info_len = *info_len;
+	attr.info.info = ptr_to_u64(info);
+
+	err = sys_bpf(BPF_OBJ_GET_INFO_BY_FD, &attr, sizeof(attr));
+	if (!err)
+		*info_len = attr.info.info_len;
 	return SCAP_SUCCESS;
 }
 
@@ -797,6 +846,27 @@ static int load_all_progs(struct bpf_engine *handle)
 	return SCAP_SUCCESS;
 }
 
+static int allocate_scap_stats_v2(struct bpf_engine *handle)
+{
+	int nprogs_attached = 0;
+	for(int j=0; j < BPF_PROG_ATTACHED_MAX; j++)
+	{
+		if (handle->m_attached_progs[j].fd != -1)
+		{
+			nprogs_attached++;
+		}
+	}
+	handle->m_nstats = (BPF_MAX_KERNEL_COUNTERS_STATS + (nprogs_attached * BPF_MAX_LIBBPF_STATS));
+	handle->m_stats = (scap_stats_v2 *)malloc(handle->m_nstats * sizeof(scap_stats_v2));
+
+	if(!handle->m_stats)
+	{
+		handle->m_nstats = 0;
+		return SCAP_FAILURE;
+	}
+	return SCAP_SUCCESS;
+}
+
 static void *perf_event_mmap(struct bpf_engine *handle, int fd, unsigned long *size, unsigned long buf_bytes_dim)
 {
 	int page_size = getpagesize();
@@ -1276,6 +1346,11 @@ int32_t scap_bpf_close(struct scap_engine_handle engine)
 		elf_end(handle->elf);
 		handle->elf = NULL;
 	}
+	if (handle->m_stats)
+	{
+		free(handle->m_stats);
+		handle->m_stats = NULL;
+	}
 	if (handle->program_fd > 0)
 	{
 		close(handle->program_fd);
@@ -1412,6 +1487,14 @@ int32_t scap_bpf_load(
 
 	/* load all progs but don't attach anything */
 	if(load_all_progs(handle) != SCAP_SUCCESS)
+	{
+		return SCAP_FAILURE;
+	}
+
+	/* allocate_scap_stats_v2 dynamically based on number of valid m_attached_progs,
+	 * In the future, it may change when and how we perform the allocation.
+	 */
+	if(allocate_scap_stats_v2(handle) != SCAP_SUCCESS)
 	{
 		return SCAP_FAILURE;
 	}
@@ -1578,6 +1661,130 @@ int32_t scap_bpf_get_stats(struct scap_engine_handle engine, OUT scap_stats* sta
 	}
 
 	return SCAP_SUCCESS;
+}
+
+const struct scap_stats_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
+{
+	struct bpf_engine *handle = engine.m_handle;
+	int ret;
+	int fd;
+	int offset = 0; // offset in stats buffer
+	*nstats = 0;
+	uint32_t nstats_allocated = handle->m_nstats;
+	scap_stats_v2* stats = handle->m_stats;
+	if (!stats)
+	{
+		*rc = SCAP_FAILURE;
+		return NULL;
+	}
+
+	if ((flags & PPM_SCAP_STATS_KERNEL_COUNTERS) && (BPF_MAX_KERNEL_COUNTERS_STATS <= nstats_allocated))
+	{
+		/* KERNEL SIDE STATS COUNTERS */
+		for(int stat = 0; stat < BPF_MAX_KERNEL_COUNTERS_STATS; stat++)
+		{
+			stats[stat].type = STATS_VALUE_TYPE_U64;
+			stats[stat].flags = PPM_SCAP_STATS_KERNEL_COUNTERS;
+			stats[stat].value.u64 = 0;
+			strlcpy(stats[stat].name, bpf_kernel_counters_stats_names[stat], STATS_NAME_MAX);
+		}
+
+		for(int cpu = 0; cpu < handle->m_ncpus; cpu++)
+		{
+			struct scap_bpf_per_cpu_state v;
+			if((ret = bpf_map_lookup_elem(handle->m_bpf_map_fds[SCAP_LOCAL_STATE_MAP], &cpu, &v)))
+			{
+				*rc = scap_errprintf(handle->m_lasterr, -ret, "Error looking up local state %d", cpu);
+				return stats;
+			}
+			stats[BPF_N_EVTS].value.u64 += v.n_evts;
+			stats[BPF_N_DROPS_BUFFER_TOTAL].value.u64 += v.n_drops_buffer;
+			stats[BPF_N_DROPS_BUFFER_CLONE_FORK_ENTER].value.u64 += v.n_drops_buffer_clone_fork_enter;
+			stats[BPF_N_DROPS_BUFFER_CLONE_FORK_EXIT].value.u64 += v.n_drops_buffer_clone_fork_exit;
+			stats[BPF_N_DROPS_BUFFER_EXECVE_ENTER].value.u64 += v.n_drops_buffer_execve_enter;
+			stats[BPF_N_DROPS_BUFFER_EXECVE_EXIT].value.u64 += v.n_drops_buffer_execve_exit;
+			stats[BPF_N_DROPS_BUFFER_CONNECT_ENTER].value.u64 += v.n_drops_buffer_connect_enter;
+			stats[BPF_N_DROPS_BUFFER_CONNECT_EXIT].value.u64 += v.n_drops_buffer_connect_exit;
+			stats[BPF_N_DROPS_BUFFER_OPEN_ENTER].value.u64 += v.n_drops_buffer_open_enter;
+			stats[BPF_N_DROPS_BUFFER_OPEN_EXIT].value.u64 += v.n_drops_buffer_open_exit;
+			stats[BPF_N_DROPS_BUFFER_DIR_FILE_ENTER].value.u64 += v.n_drops_buffer_dir_file_enter;
+			stats[BPF_N_DROPS_BUFFER_DIR_FILE_EXIT].value.u64 += v.n_drops_buffer_dir_file_exit;
+			stats[BPF_N_DROPS_BUFFER_OTHER_INTEREST_ENTER].value.u64 += v.n_drops_buffer_other_interest_enter;
+			stats[BPF_N_DROPS_BUFFER_OTHER_INTEREST_EXIT].value.u64 += v.n_drops_buffer_other_interest_exit;
+			stats[BPF_N_DROPS_SCRATCH_MAP].value.u64 += v.n_drops_scratch_map;
+			stats[BPF_N_DROPS_PAGE_FAULTS].value.u64 += v.n_drops_pf;
+			stats[BPF_N_DROPS_BUG].value.u64 += v.n_drops_bug;
+			stats[BPF_N_DROPS].value.u64 += v.n_drops_buffer + \
+				v.n_drops_scratch_map + \
+				v.n_drops_pf + \
+				v.n_drops_bug;
+		}
+		offset = BPF_MAX_KERNEL_COUNTERS_STATS;
+	}
+
+	/* LIBBPF STATS */
+
+	/* At the time of writing (Apr 2, 2023) libbpf stats are only available on a per program granularity.
+	 * This means we cannot measure the statistics for each filler / tail call individually.
+	 * Hopefully someone upstreams such capabilities to libbpf one day :)
+	 * Meanwhile, we can simulate perf comparisons between future LSM hooks and sys enter and exit tracepoints
+	 * via leveraging syscall selection mechanisms `handle->curr_sc_set`.
+	 */
+	if ((flags & PPM_SCAP_STATS_LIBBPF_STATS))
+	{
+		for(int bpf_prog = 0; bpf_prog < BPF_PROG_ATTACHED_MAX; bpf_prog++)
+		{
+			fd = handle->m_attached_progs[bpf_prog].fd;
+			if (fd < 0)
+			{
+				// we loop through each possible prog, landing here means prog was not attached
+				continue;
+			}
+			struct bpf_prog_info info = {};
+			__u32 len = sizeof(info);
+			if((bpf_obj_get_info_by_fd(fd, &info, &len)))
+			{
+				*rc = scap_errprintf(handle->m_lasterr, -ret, "Error getting bpf prog info for fd %d", fd);
+				continue;
+			}
+
+			for(int stat = 0; stat < BPF_MAX_LIBBPF_STATS; stat++)
+			{
+				if (offset > nstats_allocated - 1)
+				{
+					break;
+				}
+				stats[offset].type = STATS_VALUE_TYPE_U64;
+				stats[offset].flags = PPM_SCAP_STATS_LIBBPF_STATS;
+				strlcpy(stats[offset].name, info.name, STATS_NAME_MAX);
+				size_t dest_len = strlen(stats[offset].name);
+				switch(stat)
+				{
+				case RUN_CNT:
+					strncat(stats[offset].name, bpf_libbpf_stats_names[RUN_CNT], sizeof(stats[offset].name) - dest_len);
+					stats[offset].value.u64 = info.run_cnt;
+					break;
+				case RUN_TIME_NS:
+					strncat(stats[offset].name, bpf_libbpf_stats_names[RUN_TIME_NS], sizeof(stats[offset].name) - dest_len);
+					stats[offset].value.u64 = info.run_time_ns;
+					break;
+				case AVG_TIME_NS:
+					if (info.run_cnt > 0)
+					{
+						strncat(stats[offset].name, bpf_libbpf_stats_names[AVG_TIME_NS], sizeof(stats[offset].name) - dest_len);
+						stats[offset].value.u64 = info.run_time_ns / info.run_cnt;
+					}
+					break;
+				default:
+					break;
+				}
+				offset++;
+			}
+		}
+	}
+	*nstats = offset; // return true number of stats that were available as libbpf metrics are a function of attached progs
+	*rc = SCAP_SUCCESS;
+	return stats;
 }
 
 int32_t scap_bpf_get_n_tracepoint_hit(struct scap_engine_handle engine, long* ret)
@@ -1808,6 +2015,7 @@ const struct scap_vtable scap_bpf_engine = {
 	.stop_capture = scap_bpf_stop_capture,
 	.configure = configure,
 	.get_stats = scap_bpf_get_stats,
+	.get_stats_v2 = scap_bpf_get_stats_v2,
 	.get_n_tracepoint_hit = scap_bpf_get_n_tracepoint_hit,
 	.get_n_devs = get_n_devs,
 	.get_max_buf_used = get_max_buf_used,

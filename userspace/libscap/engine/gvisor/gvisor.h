@@ -24,8 +24,11 @@ limitations under the License.
 #include <deque>
 #include <vector>
 #include <unordered_map>
-
+#include <stdint.h>
+#include <utility>
 #include "scap.h"
+#include "scap_stats_v2.h"
+#include "scap_gvisor_stats.h"
 
 namespace scap_gvisor {
 
@@ -143,7 +146,8 @@ public:
     uint32_t get_threadinfos(uint64_t *n, const scap_threadinfo **tinfos);
     uint32_t get_fdinfos(const scap_threadinfo *tinfo, uint64_t *n, const scap_fdinfo **fdinfos);
     uint32_t get_vxid(uint64_t pid);
-    int32_t get_stats(scap_stats  *stats);
+    int32_t get_stats(scap_stats *stats);
+    const struct scap_stats_v2* get_stats_v2(uint32_t flags, uint32_t* nstats, int32_t* rc);
 private:
     int32_t process_message_from_fd(int fd);
     void free_sandbox_buffers();
@@ -182,6 +186,9 @@ private:
         // total number of drops on gVisor side
         uint64_t n_drops_gvisor;
     } m_gvisor_stats;
+
+    // Stats v2.
+    scap_stats_v2 m_stats[scap_gvisor::stats::MAX_GVISOR_COUNTERS_STATS];
 
 };
 

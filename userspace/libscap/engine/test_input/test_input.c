@@ -62,7 +62,8 @@ static int32_t next(struct scap_engine_handle handle, scap_evt** pevent, uint16_
 
 	*pevent = *(data->events++);
 	data->event_count--;
-
+	/* All the events are sent by CPU 1 */
+	*pcpuid = 1; 
 	return SCAP_SUCCESS;
 }
 
@@ -125,6 +126,7 @@ const struct scap_vtable scap_test_input_engine = {
 	.stop_capture = noop_stop_capture,
 	.configure = noop_configure,
 	.get_stats = noop_get_stats,
+	.get_stats_v2 = noop_get_stats_v2,
 	.get_n_tracepoint_hit = noop_get_n_tracepoint_hit,
 	.get_n_devs = noop_get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,

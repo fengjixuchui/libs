@@ -21,6 +21,8 @@ limitations under the License.
 #include "../../ringbuffer/devset.h"
 #include "scap_open.h"
 #include "attached_prog.h"
+#include "scap_stats_v2.h"
+#include "scap_bpf_stats.h"
 
 //
 // ebpf defs
@@ -55,4 +57,6 @@ struct bpf_engine
 	uint64_t m_api_version;
 	uint64_t m_schema_version;
 	bool capturing;
+	scap_stats_v2* m_stats;
+	uint32_t m_nstats;
 };

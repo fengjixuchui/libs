@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,22 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
+
 #pragma once
 
-#include <stdint.h>
-#include "ringbuffer/devset.h"
-#include "scap_open.h"
-#include "scap_stats_v2.h"
-#include "scap_kmod_stats.h"
+namespace scap_gvisor {
+namespace stats {
+    enum gvisor_counters_stats {
+        GVISOR_N_EVTS = 0,
+        GVISOR_N_DROPS_BUG,
+        GVISOR_N_DROPS_BUFFER_TOTAL,
+        GVISOR_N_DROPS,
+        MAX_GVISOR_COUNTERS_STATS
+    };
 
-
-struct kmod_engine
-{
-	struct scap_device_set m_dev_set;
-	char* m_lasterr;
-	interesting_ppm_sc_set curr_sc_set;
-	uint64_t m_api_version;
-	uint64_t m_schema_version;
-	bool capturing;
-	scap_stats_v2 m_stats[KMOD_MAX_KERNEL_COUNTERS_STATS];
-};
+} // namespace stats
+} // namespace scap_gvisor
