@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -16,12 +17,12 @@ int BPF_PROG(unlinkat_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, UNLINKAT_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, UNLINKAT_E_SIZE, PPME_SYSCALL_UNLINKAT_2_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_UNLINKAT_2_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -57,12 +58,12 @@ int BPF_PROG(unlinkat_x,
 	auxmap__store_s64_param(auxmap, ret);
 
 	/* Parameter 2: dirfd (type: PT_FD) */
-	s32 dirfd = (s32)extract__syscall_argument(regs, 0);
+	int32_t dirfd = (int32_t)extract__syscall_argument(regs, 0);
 	if(dirfd == AT_FDCWD)
 	{
 		dirfd = PPM_AT_FDCWD;
 	}
-	auxmap__store_s64_param(auxmap, (s64)dirfd);
+	auxmap__store_s64_param(auxmap, (int64_t)dirfd);
 
 	/* Parameter 3: path (type: PT_FSRELPATH) */
 	unsigned long path_pointer = extract__syscall_argument(regs, 1);
@@ -70,7 +71,7 @@ int BPF_PROG(unlinkat_x,
 
 	/* Parameter 4: flags (type: PT_FLAGS32) */
 	unsigned long flags = extract__syscall_argument(regs, 2);
-	auxmap__store_u32_param(auxmap, unlinkat_flags_to_scap(flags));
+	auxmap__store_u32_param(auxmap, unlinkat_flags_to_scap((int32_t) flags));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

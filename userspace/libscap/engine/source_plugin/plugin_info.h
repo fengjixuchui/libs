@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +18,7 @@ limitations under the License.
 
 #pragma once
 
-#include "../plugin/plugin_api.h"
+#include <plugin/plugin_api.h>
 
 //
 // Small C interface that is passed down to libscap
@@ -32,6 +33,6 @@ typedef struct
 
 	ss_instance_t* (*open)(ss_plugin_t* s, const char* params, ss_plugin_rc* rc);
 	void (*close)(ss_plugin_t* s, ss_instance_t* h);
-	ss_plugin_rc (*next_batch)(ss_plugin_t* s, ss_instance_t* h, uint32_t *nevts, ss_plugin_event **evts);
+	ss_plugin_rc (*next_batch)(ss_plugin_t* s, ss_instance_t* h, uint32_t *nevts, ss_plugin_event ***evts);
 	const char *(*get_last_error)(ss_plugin_t *s);
 } scap_source_plugin;

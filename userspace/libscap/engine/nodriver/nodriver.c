@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,13 +21,13 @@ limitations under the License.
 
 #define SCAP_HANDLE_T struct nodriver_engine
 
-#include "nodriver.h"
-#include "noop.h"
+#include <libscap/engine/nodriver/nodriver.h>
+#include <libscap/engine/noop/noop.h>
 
-#include "scap.h"
-#include "strlcpy.h"
-#include "gettimeofday.h"
-#include "sleep.h"
+#include <libscap/scap.h>
+#include <libscap/strl.h>
+#include <libscap/scap_gettimeofday.h>
+#include <libscap/scap_sleep.h>
 
 static struct nodriver_engine* alloc_handle(scap_t* main_handle, char* lasterr_ptr)
 {
@@ -38,7 +39,12 @@ static struct nodriver_engine* alloc_handle(scap_t* main_handle, char* lasterr_p
 	return engine;
 }
 
-static int32_t next(struct scap_engine_handle handle, scap_evt** pevent, uint16_t* pcpuid)
+static int32_t init(scap_t* handle, scap_open_args *oargs)
+{
+	return SCAP_SUCCESS;
+}
+
+static int32_t next(struct scap_engine_handle handle, scap_evt** pevent, uint16_t* pdevid, uint32_t* pflags)
 {
 	static scap_evt evt;
 	evt.len = 0;
@@ -50,16 +56,17 @@ static int32_t next(struct scap_engine_handle handle, scap_evt** pevent, uint16_
 
 	evt.ts = get_timestamp_ns();
 	*pevent = &evt;
+	*pdevid = 0;
+	*pflags = 0;
 	return SCAP_SUCCESS;
 }
 
 const struct scap_vtable scap_nodriver_engine = {
 	.name = NODRIVER_ENGINE,
-	.mode = SCAP_MODE_NODRIVER,
 	.savefile_ops = NULL,
 
 	.alloc_handle = alloc_handle,
-	.init = NULL,
+	.init = init,
 	.free_handle = noop_free_handle,
 	.close = noop_close_engine,
 	.next = next,
@@ -71,10 +78,6 @@ const struct scap_vtable scap_nodriver_engine = {
 	.get_n_tracepoint_hit = noop_get_n_tracepoint_hit,
 	.get_n_devs = noop_get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,
-	.get_threadlist = noop_get_threadlist,
-	.get_vpid = noop_get_vxid,
-	.get_vtid = noop_get_vxid,
-	.getpid_global = noop_getpid_global,
 	.get_api_version = NULL,
 	.get_schema_version = NULL,
 };

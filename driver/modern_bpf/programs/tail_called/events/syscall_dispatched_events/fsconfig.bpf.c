@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -16,12 +17,12 @@ int BPF_PROG(fsconfig_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, FSCONFIG_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, FSCONFIG_E_SIZE, PPME_SYSCALL_FSCONFIG_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_FSCONFIG_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -58,12 +59,12 @@ int BPF_PROG(fsconfig_x,
 
 	/* Parameter 2: fd (type: PT_FD) */
 	/* This is the file-system fd */
-	s32 fd = (s32)extract__syscall_argument(regs, 0);
-	auxmap__store_s64_param(auxmap, (s64)fd);
+	int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
+	auxmap__store_s64_param(auxmap, (int64_t)fd);
 
 	/* Parameter 3: cmd (type: PT_ENUMFLAGS32) */
-	u32 cmd = (u32)extract__syscall_argument(regs, 1);
-	u32 scap_cmd = fsconfig_cmds_to_scap(cmd);
+	uint32_t cmd = (uint32_t)extract__syscall_argument(regs, 1);
+	uint32_t scap_cmd = fsconfig_cmds_to_scap(cmd);
 	auxmap__store_u32_param(auxmap, scap_cmd);
 
 	/* Parameter 4: key (type: PT_CHARBUF) */

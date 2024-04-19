@@ -4,6 +4,7 @@ from sinspqa.sinsp import assert_events
 from sinspqa.docker import get_container_id
 
 sinsp_args = [
+    "-j",
     "-f", "evt.category=process and not container.id=host",
     "-o", "%container.id %evt.args %evt.category %evt.type %proc.cmdline %proc.exe %user.uid %user.name %user.homedir %group.gid %group.name"
 ]
@@ -37,7 +38,7 @@ def test_exec_in_container(sinsp, run_containers: dict):
     expected_events = [
         {
             'container.id': container_id,
-            'evt.args': 'filename=/http-echo ',
+            'evt.args': 'filename=/http-echo',
             'evt.category': 'process',
             'evt.type': 'execve',
             'proc.exe': 'runc',

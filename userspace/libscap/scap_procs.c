@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,20 +21,9 @@ limitations under the License.
 #include <stdlib.h>
 #include <string.h>
 
-#include "scap.h"
-#include "scap-int.h"
-
-int32_t scap_getpid_global(scap_t* handle, int64_t* pid)
-{
-	if(handle->m_vtable)
-	{
-		return handle->m_vtable->getpid_global(handle->m_engine, pid, handle->m_lasterr);
-	}
-
-	ASSERT(false);
-	snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "Cannot get pid (capture not enabled)");
-	return SCAP_FAILURE;
-}
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
+#include <libscap/strerror.h>
 
 //
 // Delete a process entry
@@ -70,41 +60,7 @@ void scap_proc_free_table(struct scap_proclist* proclist)
 	}
 }
 
-struct scap_threadinfo *scap_proc_alloc(scap_t *handle)
-{
-	struct scap_threadinfo *tinfo = (struct scap_threadinfo*) calloc(1, sizeof(scap_threadinfo));
-	if(tinfo == NULL)
-	{
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "process table allocation error (1)");
-		return NULL;
-	}
-
-	return tinfo;
-}
-
-void scap_proc_free(scap_t* handle, struct scap_threadinfo* proc)
-{
-	scap_fd_free_proc_fd_table(proc);
-	free(proc);
-}
-
-int32_t scap_proc_add(scap_t* handle, uint64_t tid, scap_threadinfo* tinfo)
-{
-	int32_t uth_status = SCAP_SUCCESS;
-
-	HASH_ADD_INT64(handle->m_proclist.m_proclist, tid, tinfo);
-	if(uth_status == SCAP_SUCCESS)
-	{
-		return SCAP_SUCCESS;
-	}
-	else
-	{
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "Could not add tid to hash table");
-		return SCAP_FAILURE;
-	}
-}
-
-int32_t scap_fd_add(scap_t *handle, scap_threadinfo* tinfo, uint64_t fd, scap_fdinfo* fdinfo)
+int32_t scap_fd_add(scap_threadinfo* tinfo, scap_fdinfo* fdinfo)
 {
 	int32_t uth_status = SCAP_SUCCESS;
 
@@ -115,208 +71,148 @@ int32_t scap_fd_add(scap_t *handle, scap_threadinfo* tinfo, uint64_t fd, scap_fd
 	}
 	else
 	{
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "Could not add fd to hash table");
 		return SCAP_FAILURE;
 	}
 }
 
-int32_t scap_check_suppressed(struct scap_suppress* suppress, scap_evt *pevent, bool *suppressed, char *error)
+int32_t default_proc_entry_callback(void* context, char* error, int64_t tid, scap_threadinfo* tinfo,
+				    scap_fdinfo* fdinfo, scap_threadinfo** new_tinfo)
 {
-	uint16_t *lens;
-	char *valptr;
-	uint32_t j;
-	int32_t res = SCAP_SUCCESS;
-	const char *comm = NULL;
-	uint64_t *ptid = NULL;
-	scap_tid *stid;
-
-	*suppressed = false;
-
-	// For events that can create a new tid (fork, vfork, clone),
-	// we need to check the comm, which might also update the set
-	// of suppressed tids.
-
-	switch(pevent->type)
+	struct scap_proclist* proclist = (struct scap_proclist*)context;
+	if(fdinfo != NULL)
 	{
-	case PPME_SYSCALL_CLONE_20_X:
-	case PPME_SYSCALL_FORK_20_X:
-	case PPME_SYSCALL_VFORK_20_X:
-	case PPME_SYSCALL_EXECVE_19_X:
-	case PPME_SYSCALL_EXECVEAT_X:
-	case PPME_SYSCALL_CLONE3_X:
+		// add an fd
 
-		lens = (uint16_t *)((char *)pevent + sizeof(struct ppm_evt_hdr));
-		valptr = (char *)lens + pevent->nparams * sizeof(uint16_t);
-
-		if(pevent->nparams < 14)
+		// First, find the threadinfo (if not passed by the caller)
+		if(tinfo == NULL)
 		{
-			snprintf(error, SCAP_LASTERR_SIZE, "Could not find process comm in event argument list");
+			//
+			// Identify the process descriptor
+			//
+			HASH_FIND_INT64(proclist->m_proclist, &tid, tinfo);
+
+			if(tinfo == NULL)
+			{
+				//
+				// We have the fdinfo but no associated tid, skip it
+				//
+				return SCAP_SUCCESS;
+			}
+		}
+
+		int32_t uth_status = SCAP_SUCCESS;
+		scap_fdinfo *tfdi;
+
+		// Make sure this fd doesn't already exist
+		HASH_FIND_INT64(tinfo->fdlist, &(fdinfo->fd), tfdi);
+		if(tfdi != NULL)
+		{
+			//
+			// This can happen if:
+			//  - a close() has been dropped when capturing
+			//  - an fd has been closed by clone() or execve() (it happens when the fd is opened with the FD_CLOEXEC flag,
+			//    which we don't currently parse.
+			// In either case, removing the old fd, replacing it with the new one and keeping going is a reasonable
+			// choice.
+			//
+			HASH_DEL(tinfo->fdlist, tfdi);
+			free(tfdi);
+		}
+
+		scap_fdinfo *new_fdi = malloc(sizeof(*new_fdi));
+		if(new_fdi == NULL)
+		{
+			snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (1)");
 			return SCAP_FAILURE;
 		}
+		*new_fdi = *fdinfo;
 
-		// For all of these events, the comm is argument 14,
-		// so we need to walk the list of params that far to
-		// find the comm.
-		for(j = 0; j < 13; j++)
+		HASH_ADD_INT64(tinfo->fdlist, fd, new_fdi);
+		if(uth_status != SCAP_SUCCESS)
 		{
-			if(j == 5)
-			{
-				ptid = (uint64_t *) valptr;
-			}
-
-			valptr += lens[j];
-		}
-
-		if(ptid == NULL)
-		{
-			snprintf(error, SCAP_LASTERR_SIZE, "Could not find ptid in event argument list");
+			snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (2)");
 			return SCAP_FAILURE;
 		}
-
-		comm = valptr;
-
-		if((res = scap_update_suppressed(suppress,
-						 comm,
-						 pevent->tid, *ptid,
-						 suppressed)) != SCAP_SUCCESS)
-		{
-			// scap_update_suppressed already set handle->m_lasterr on error.
-			return res;
-		}
-
-		break;
-
-	default:
-
-		HASH_FIND_INT64(suppress->m_suppressed_tids, &(pevent->tid), stid);
-
-		// When threads exit they are always removed and no longer suppressed.
-		if(pevent->type == PPME_PROCEXIT_1_E)
-		{
-			if(stid != NULL)
-			{
-				HASH_DEL(suppress->m_suppressed_tids, stid);
-				free(stid);
-				*suppressed = true;
-			}
-			else
-			{
-				*suppressed = false;
-			}
-		}
-		else
-		{
-			*suppressed = (stid != NULL);
-		}
-
-		break;
 	}
-
-	return SCAP_SUCCESS;
-}
-
-int32_t scap_fd_scan_vtable(scap_t *handle, const scap_threadinfo *src_tinfo, scap_threadinfo *dst_tinfo, char *error)
-{
-	uint64_t n_fdinfos, i;
-	const scap_fdinfo *fdinfos;
-	scap_fdinfo *fdi = NULL;
-	uint32_t res;
-
-	res = handle->m_vtable->get_fdinfos(handle->m_engine, src_tinfo, &n_fdinfos, &fdinfos);
-	if (res != SCAP_SUCCESS)
+	else
 	{
-		return res;
-	}
-
-	for (i = 0; i < n_fdinfos; i++)
-	{
-		res = scap_fd_allocate_fdinfo(&fdi, fdinfos[i].fd, fdinfos[i].type);
-		if (res != SCAP_SUCCESS)
+		// add a thread
+		// get a copy of tinfo on the heap
+		scap_threadinfo *heap_tinfo = malloc(sizeof(*heap_tinfo));
+		if(heap_tinfo == NULL)
 		{
-			snprintf(error, SCAP_LASTERR_SIZE, "can't allocate scap fd handle for file fd %" PRIu64, fdinfos[i].fd);
-			return res;
-		}
-
-		// copy the contents
-		*fdi = fdinfos[i];
-
-		res = scap_add_fd_to_proc_table(&handle->m_proclist, dst_tinfo, fdi, error);
-		if (res != SCAP_SUCCESS)
-		{
-			scap_fd_free_fdinfo(&fdi);
-			continue;
-		}
-
-		if(handle->m_proclist.m_proc_callback != NULL)
-		{
-			if(fdi)
-			{
-				scap_fd_free_fdinfo(&fdi);
-			}
-		}
-	}
-
-	return SCAP_SUCCESS;
-}
-
-int32_t scap_proc_scan_vtable(char *error, scap_t *handle)
-{
-	const scap_threadinfo *tinfos;
-	scap_threadinfo *tinfo;
-	uint32_t res = SCAP_SUCCESS;
-	uint64_t n_tinfos, i;
-
-	res = handle->m_vtable->get_threadinfos(handle->m_engine, &n_tinfos, &tinfos);
-	if (res != SCAP_SUCCESS)
-	{
-		snprintf(error, SCAP_LASTERR_SIZE, "cannot get system thread information: %s", handle->m_lasterr);
-		return res;
-	}
-
-	for (i = 0; i < n_tinfos; i++)
-	{
-		bool free_tinfo = false;
-		if((tinfo = scap_proc_alloc(handle)) == NULL)
-		{
-			// Error message saved in handle->m_lasterr
-			snprintf(error, SCAP_LASTERR_SIZE, "can't allocate procinfo struct: %s", handle->m_lasterr);
-			return SCAP_FAILURE;
+			return scap_errprintf(error, errno, "can't allocate procinfo struct");
 		}
 
 		// copy the structure contents
-		*tinfo = tinfos[i];
+		*heap_tinfo = *tinfo;
 
-		//
-		// Add the entry to the process table, or fire the notification callback
-		//
-		if(handle->m_proclist.m_proc_callback == NULL)
+		int32_t uth_status = SCAP_SUCCESS;
+		HASH_ADD_INT64(proclist->m_proclist, tid, heap_tinfo);
+		if(uth_status != SCAP_SUCCESS)
 		{
-			int32_t uth_status = SCAP_SUCCESS;
-			HASH_ADD_INT64(handle->m_proclist.m_proclist, tid, tinfo);
-			if(uth_status != SCAP_SUCCESS)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (2)");
-				free(tinfo);
-				return SCAP_FAILURE;
-			}
-		}
-		else
-		{
-			handle->m_proclist.m_proc_callback(
-				handle->m_proclist.m_proc_callback_context, tinfo->tid, tinfo, NULL);
-			free_tinfo = true;
+			snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (2)");
+			free(heap_tinfo);
+			return SCAP_FAILURE;
 		}
 
-		if(tinfo->pid == tinfo->tid)
+		if(new_tinfo)
 		{
-			res = scap_fd_scan_vtable(handle, &tinfos[i], tinfo, error);
-		}
-
-		if(free_tinfo)
-		{
-			free(tinfo);
+			*new_tinfo = heap_tinfo;
 		}
 	}
-
 	return SCAP_SUCCESS;
+}
+
+void init_proclist(struct scap_proclist* proclist, proc_entry_callback callback, void* callback_context)
+{
+	if(callback == NULL)
+	{
+		proclist->m_proc_callback = default_proc_entry_callback;
+		proclist->m_proc_callback_context = proclist;
+	}
+	else
+	{
+		proclist->m_proc_callback = callback;
+		proclist->m_proc_callback_context = callback_context;
+	}
+
+	proclist->m_proclist = NULL;
+}
+bool scap_alloc_proclist_info(struct ppm_proclist_info **proclist_p, uint32_t n_entries, char* error)
+{
+	uint32_t memsize;
+
+	if(n_entries >= SCAP_DRIVER_PROCINFO_MAX_SIZE)
+	{
+		snprintf(error, SCAP_LASTERR_SIZE, "driver process list too big");
+		return false;
+	}
+
+	memsize = sizeof(struct ppm_proclist_info) +
+		  sizeof(struct ppm_proc_info) * n_entries;
+
+	struct ppm_proclist_info *procinfo = (struct ppm_proclist_info*) realloc(*proclist_p, memsize);
+	if(procinfo == NULL)
+	{
+		free(*proclist_p);
+		*proclist_p = NULL;
+		snprintf(error, SCAP_LASTERR_SIZE, "driver process list allocation error");
+		return false;
+	}
+
+	if(*proclist_p == NULL)
+	{
+		procinfo->n_entries = 0;
+	}
+
+	procinfo->max_entries = n_entries;
+	*proclist_p = procinfo;
+
+	return true;
+}
+
+void scap_free_proclist_info(struct ppm_proclist_info *proclist)
+{
+	free(proclist);
 }

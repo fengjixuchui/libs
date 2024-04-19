@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
 Copyright (C) 2023 The Falco Authors.
 
@@ -19,22 +20,16 @@ limitations under the License.
 #include <stdio.h>
 
 #define SCAP_HANDLE_T struct modern_bpf_engine
-#include "scap_modern_bpf.h"
+#include <libscap/engine/modern_bpf/scap_modern_bpf.h>
 #include <libpman.h>
-#include "scap.h"
-#include "scap-int.h"
-#include "scap_procs.h"
-#include "noop.h"
-#include "strlcpy.h"
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
+#include <libscap/scap_procs.h>
+#include <libscap/engine/noop/noop.h>
+#include <libscap/strl.h>
 #include <sys/utsname.h>
-#include "ringbuffer/ringbuffer.h"
-
-const char * const modern_bpf_kernel_counters_stats_names[] = {
-	[MODERN_BPF_N_EVTS] = "n_evts",
-	[MODERN_BPF_N_DROPS_BUFFER_TOTAL] = "n_drops_buffer_total",
-	[MODERN_BPF_N_DROPS_SCRATCH_MAP] = "n_drops_scratch_map",
-	[MODERN_BPF_N_DROPS] = "n_drops",
-};
+#include <libscap/ringbuffer/ringbuffer.h>
+#include <libscap/scap_engine_util.h>
 
 static struct modern_bpf_engine* scap_modern_bpf__alloc_engine(scap_t* main_handle, char* lasterr_ptr)
 {
@@ -54,9 +49,10 @@ static void scap_modern_bpf__free_engine(struct scap_engine_handle engine)
 /* The third parameter is not the CPU number from which we extract the event but the ring buffer number.
  * For the old BPF probe and the kernel module the number of CPUs is equal to the number of buffers since we always use a per-CPU approach.
  */
-static int32_t scap_modern_bpf__next(struct scap_engine_handle engine, OUT scap_evt** pevent, OUT uint16_t* buffer_id)
+static int32_t scap_modern_bpf__next(struct scap_engine_handle engine, OUT scap_evt** pevent, OUT uint16_t* buffer_id,
+				     OUT uint32_t* pflags)
 {
-	pman_consume_first_event((void**)pevent, buffer_id);
+	pman_consume_first_event((void**)pevent, (int16_t*)buffer_id);
 
 	if((*pevent) == NULL)
 	{
@@ -69,6 +65,7 @@ static int32_t scap_modern_bpf__next(struct scap_engine_handle engine, OUT scap_
 	{
 		engine.m_handle->m_retry_us = BUFFER_EMPTY_WAIT_TIME_US_START;
 	}
+	*pflags = 0;
 	return SCAP_SUCCESS;
 }
 
@@ -111,9 +108,6 @@ static int32_t scap_modern_bpf__configure(struct scap_engine_handle engine, enum
 		{
 			return scap_modern_bpf_start_dropping_mode(engine, arg1);
 		}
-	case SCAP_TRACERS_CAPTURE:
-		/* Not supported */
-		return SCAP_SUCCESS;
 	case SCAP_SNAPLEN:
 		pman_set_snaplen(arg1);
 		break;
@@ -147,6 +141,17 @@ static int32_t scap_modern_bpf__configure(struct scap_engine_handle engine, enum
 int32_t scap_modern_bpf__start_capture(struct scap_engine_handle engine)
 {
 	struct modern_bpf_engine* handle = engine.m_handle;
+	/* Here we are covering the case in which some syscalls don't have an associated ppm_sc
+	 * and so we cannot set them as (un)interesting. For this reason, we default them to 0.
+	 * Please note this is an extra check since our ppm_sc should already cover all possible syscalls.
+	 * Ideally we should do this only once, but right now in our code we don't have a "right" place to do it.
+	 * We need to move it, if `scap_start_capture` will be called frequently in our flow, right now in live mode, it
+	 * should be called only once...
+	 */
+	for(int i = 0; i < SYSCALL_TABLE_SIZE; i++)
+	{
+		pman_mark_single_64bit_syscall(i, false);
+	}
 	handle->capturing = true;
 	return pman_enforce_sc_set(handle->curr_sc_set.ppm_sc);
 }
@@ -173,19 +178,19 @@ int32_t scap_modern_bpf__init(scap_t* handle, scap_open_args* oargs)
 	 */
 	if(check_buffer_bytes_dim(handle->m_lasterr, params->buffer_bytes_dim) != SCAP_SUCCESS)
 	{
-		return SCAP_FAILURE;
+		return ENOTSUP;
 	}
 
 	if(!pman_check_support())
 	{
-		return SCAP_FAILURE;
+		return ENOTSUP;
 	}
 
 	/* Initialize the libpman internal state.
 	 * Validation of `cpus_for_each_buffer` is made inside libpman
 	 * since this is the unique place where we have the number of CPUs
 	 */
-	if(pman_init_state(params->verbose, params->buffer_bytes_dim, params->cpus_for_each_buffer, params->allocate_online_only))
+	if(pman_init_state(oargs->log_fn, params->buffer_bytes_dim, params->cpus_for_each_buffer, params->allocate_online_only))
 	{
 		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "unable to configure the libpman state.");
 		return SCAP_FAILURE;
@@ -206,15 +211,6 @@ int32_t scap_modern_bpf__init(scap_t* handle, scap_open_args* oargs)
 		return ret;
 	}
 
-	/* Here we are covering the case in which some syscalls don't have an associated ppm_sc
-	 * and so we cannot set them as (un)interesting. For this reason, we default them to 0.
-	 * Please note this is an extra check since our ppm_sc should already cover all possible syscalls.
-	 */
-	for(int i = 0; i < SYSCALL_TABLE_SIZE; i++)
-	{
-		pman_mark_single_64bit_syscall(i, false);
-	}
-
 	/* Store interesting sc codes */
 	memcpy(&engine.m_handle->curr_sc_set, &oargs->ppm_sc_of_interest, sizeof(interesting_ppm_sc_set));
 
@@ -229,7 +225,18 @@ int32_t scap_modern_bpf__init(scap_t* handle, scap_open_args* oargs)
 	engine.m_handle->m_api_version = pman_get_probe_api_ver();
 	engine.m_handle->m_schema_version = pman_get_probe_schema_ver();
 
+	engine.m_handle->m_flags = 0;
+	if(scap_get_bpf_stats_enabled())
+	{
+		engine.m_handle->m_flags |= ENGINE_FLAG_BPF_STATS_ENABLED;
+	}
+
 	return SCAP_SUCCESS;
+}
+
+static uint64_t scap_modern_bpf__get_flags(struct scap_engine_handle engine)
+{
+	return engine.m_handle->m_flags;
 }
 
 int32_t scap_modern_bpf__close(struct scap_engine_handle engine)
@@ -245,22 +252,22 @@ static uint32_t scap_modern_bpf__get_n_devs(struct scap_engine_handle engine)
 
 int32_t scap_modern_bpf__get_stats(struct scap_engine_handle engine, OUT scap_stats* stats)
 {
-	if(pman_get_scap_stats((void*)stats))
+	if(pman_get_scap_stats(stats))
 	{
 		return SCAP_FAILURE;
 	}
 	return SCAP_SUCCESS;
 }
 
-const struct scap_stats_v2* scap_modern_bpf__get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
+const struct metrics_v2* scap_modern_bpf__get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
 {
-	*rc = SCAP_SUCCESS;
-	if(pman_get_scap_stats_v2((void*)engine.m_handle->m_stats, flags, (void*)nstats))
+	struct modern_bpf_engine* handle = engine.m_handle;
+	if (!(handle->m_flags & ENGINE_FLAG_BPF_STATS_ENABLED))
 	{
-		*rc = SCAP_FAILURE;
-		return NULL;
+		// we can't collect libbpf stats if bpf stats are not enabled
+		flags &= ~METRICS_V2_LIBBPF_STATS;
 	}
-	return engine.m_handle->m_stats;
+	return pman_get_metrics_v2(flags, nstats, rc);
 }
 
 int32_t scap_modern_bpf__get_n_tracepoint_hit(struct scap_engine_handle engine, OUT long* ret)
@@ -284,11 +291,11 @@ uint64_t scap_modern_bpf__get_schema_version(struct scap_engine_handle engine)
 
 struct scap_vtable scap_modern_bpf_engine = {
 	.name = MODERN_BPF_ENGINE,
-	.mode = SCAP_MODE_LIVE,
 	.savefile_ops = NULL,
 
 	.alloc_handle = scap_modern_bpf__alloc_engine,
 	.init = scap_modern_bpf__init,
+	.get_flags = scap_modern_bpf__get_flags,
 	.free_handle = scap_modern_bpf__free_engine,
 	.close = scap_modern_bpf__close,
 	.next = scap_modern_bpf__next,
@@ -300,10 +307,6 @@ struct scap_vtable scap_modern_bpf_engine = {
 	.get_n_tracepoint_hit = scap_modern_bpf__get_n_tracepoint_hit,
 	.get_n_devs = scap_modern_bpf__get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,
-	.get_threadlist = scap_procfs_get_threadlist,
-	.get_vpid = noop_get_vxid,
-	.get_vtid = noop_get_vxid,
-	.getpid_global = scap_os_getpid_global,
 	.get_api_version = scap_modern_bpf__get_api_version,
 	.get_schema_version = scap_modern_bpf__get_schema_version,
 };

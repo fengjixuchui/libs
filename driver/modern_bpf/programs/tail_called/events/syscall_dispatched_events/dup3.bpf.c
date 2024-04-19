@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -15,18 +16,18 @@ int BPF_PROG(dup3_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, DUP3_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, DUP3_E_SIZE, PPME_SYSCALL_DUP3_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_DUP3_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: oldfd (type: PT_FD) */
-	s32 oldfd = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)oldfd);
+	int32_t oldfd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)oldfd);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -45,12 +46,12 @@ int BPF_PROG(dup3_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, DUP3_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, DUP3_X_SIZE, PPME_SYSCALL_DUP3_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_DUP3_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -58,15 +59,15 @@ int BPF_PROG(dup3_x,
 	ringbuf__store_s64(&ringbuf, ret);
 
 	/* Parameter 2: oldfd (type: PT_FD) */
-	s32 oldfd = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)oldfd);
+	int32_t oldfd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)oldfd);
 
 	/* Parameter 3: newfd (type: PT_FD) */
-	s32 newfd = (s32)extract__syscall_argument(regs, 1);
-	ringbuf__store_s64(&ringbuf, (s64)newfd);
+	int32_t newfd = (int32_t)extract__syscall_argument(regs, 1);
+	ringbuf__store_s64(&ringbuf, (int64_t)newfd);
 
 	/* Parameter 4: flags (type: PT_FLAGS32) */
-	unsigned long flags = extract__syscall_argument(regs, 2);
+	int32_t flags = extract__syscall_argument(regs, 2);
 	ringbuf__store_u32(&ringbuf, dup3_flags_to_scap(flags));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

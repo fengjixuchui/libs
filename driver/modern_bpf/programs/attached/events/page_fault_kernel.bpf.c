@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -18,18 +19,18 @@ int BPF_PROG(pf_kernel,
 	     unsigned long address, struct pt_regs *regs,
 	     unsigned long error_code)
 {
-	if(sampling_logic(ctx, PPME_PAGE_FAULT_E, TRACEPOINT))
+	if(sampling_logic(ctx, PPME_PAGE_FAULT_E, MODERN_BPF_TRACEPOINT))
 	{
 		return 0;
 	}
 
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, PAGE_FAULT_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, PAGE_FAULT_SIZE, PPME_PAGE_FAULT_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_PAGE_FAULT_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

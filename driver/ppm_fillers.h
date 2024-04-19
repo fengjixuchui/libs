@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -66,12 +67,14 @@ or GPL2.txt for full copies of the license.
 	FN(sys_pwritev_e)			\
 	FN(sys_nanosleep_e)			\
 	FN(sys_getrlimit_setrlimit_e)		\
-	FN(sys_getrlimit_setrlrimit_x)		\
+	FN(sys_getrlimit_x)		\
+	FN(sys_setrlimit_x)		\
 	FN(sys_prlimit_e)			\
 	FN(sys_prlimit_x)			\
 	FN(sched_switch_e)			\
 	FN(sched_drop)				\
 	FN(sys_fcntl_e)				\
+	FN(sys_fcntl_x)				\
 	FN(sys_ptrace_e)			\
 	FN(sys_ptrace_x)			\
 	FN(sys_mmap_e)				\
@@ -104,7 +107,7 @@ or GPL2.txt for full copies of the license.
 	FN(sys_fchmodat_x)			\
 	FN(sys_chmod_x)				\
 	FN(sys_fchmod_x)			\
-        FN(sys_chown_x)				\
+	FN(sys_chown_x)				\
 	FN(sys_lchown_x)			\
 	FN(sys_fchown_x)			\
 	FN(sys_fchownat_x)			\
@@ -117,11 +120,13 @@ or GPL2.txt for full copies of the license.
 	FN(sys_mprotect_e)			\
 	FN(sys_mprotect_x)			\
 	FN(sys_execveat_e)			\
-	FN(execve_family_flags)		\
+	FN(execve_extra_tail_1)		\
+	FN(execve_extra_tail_2)		\
 	FN(sys_copy_file_range_e)	\
 	FN(sys_copy_file_range_x)	\
 	FN(sys_connect_e)			\
 	FN(sys_open_by_handle_at_x) \
+	FN(open_by_handle_at_x_extra_tail_1) \
 	FN(sys_io_uring_setup_x)		\
 	FN(sys_io_uring_enter_x)		\
 	FN(sys_io_uring_register_x)		\
@@ -140,6 +145,7 @@ or GPL2.txt for full copies of the license.
 	FN(sched_prog_exec_2)		        \
 	FN(sched_prog_exec_3)		        \
 	FN(sched_prog_exec_4)		        \
+	FN(sched_prog_exec_5)		        \
 	FN(sched_prog_fork)			\
 	FN(sched_prog_fork_2)		        \
 	FN(sched_prog_fork_3)		        \
@@ -160,6 +166,7 @@ or GPL2.txt for full copies of the license.
 	FN(sys_setpgid_e)                 \
 	FN(sys_recvfrom_e)                 \
 	FN(sys_recvmsg_e)                 \
+	FN(sys_listen_e)                  \
 	FN(sys_signalfd_e)                 \
 	FN(sys_splice_e)				\
 	FN(sys_umount_x)				\
@@ -172,7 +179,18 @@ or GPL2.txt for full copies of the license.
 	FN(sys_eventfd2_x)          \
 	FN(sys_signalfd4_e)          \
 	FN(sys_signalfd4_x)          \
-	FN(sys_prctl_x)				\
+	FN(sys_prctl_x)		 		\
+	FN(sys_memfd_create_x)                 \
+	FN(sys_pidfd_getfd_x)			\
+	FN(sys_pidfd_open_x)				\
+	FN(sys_init_module_x)				\
+	FN(sys_finit_module_x)				\
+	FN(sys_mknod_x)						\
+	FN(sys_mknodat_x)					\
+	FN(sys_newfstatat_x)					\
+	FN(sys_process_vm_readv_x)					\
+	FN(sys_process_vm_writev_x)					\
+	FN(sys_delete_module_x) 			   \
 	FN(terminate_filler)
 
 #define FILLER_ENUM_FN(x) PPM_FILLER_##x,

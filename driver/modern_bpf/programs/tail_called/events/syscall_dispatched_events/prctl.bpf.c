@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -16,12 +17,12 @@ int BPF_PROG(prctl_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, PRCTL_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, PRCTL_E_SIZE, PPME_SYSCALL_PRCTL_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_PRCTL_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -61,7 +62,7 @@ int BPF_PROG(prctl_x,
 	auxmap__store_s64_param(auxmap, ret);
 
 	/* Parameter 2: option (type: PT_ENUMFLAGS32) */
-	u32 option = (u32)prctl_options_to_scap(extract__syscall_argument(regs, 0));
+	uint32_t option = (uint32_t)prctl_options_to_scap(extract__syscall_argument(regs, 0));
 	auxmap__store_u32_param(auxmap, option);
 
 	unsigned long arg2 = extract__syscall_argument(regs, 1);
@@ -79,7 +80,7 @@ int BPF_PROG(prctl_x,
 			auxmap__store_empty_param(auxmap);
 			bpf_probe_read_user(&reaper_attr, sizeof(reaper_attr), (void*)arg2);
 			/* Parameter 4: arg2_int (type: PT_INT64) */
-			auxmap__store_s64_param(auxmap, (s64)reaper_attr);
+			auxmap__store_s64_param(auxmap, (int64_t)reaper_attr);
 			break;
 		case PPM_PR_SET_CHILD_SUBREAPER:
 		default:

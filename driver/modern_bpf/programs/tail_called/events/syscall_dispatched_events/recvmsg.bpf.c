@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -15,23 +16,23 @@ int BPF_PROG(recvmsg_e,
 	     struct pt_regs *regs,
 	     long id)
 {
-	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, RECVMSG_E_SIZE))
-	{
-		return 0;
-	}
-
-	ringbuf__store_event_header(&ringbuf, PPME_SOCKET_RECVMSG_E);
-
-	/*=============================== COLLECT PARAMETERS  ===========================*/
-
 	/* Collect parameters at the beginning to manage socketcalls */
 	unsigned long args[1];
 	extract__network_args(args, 1, regs);
 
+	struct ringbuf_struct ringbuf;
+	if(!ringbuf__reserve_space(&ringbuf, ctx, RECVMSG_E_SIZE, PPME_SOCKET_RECVMSG_E))
+	{
+		return 0;
+	}
+
+	ringbuf__store_event_header(&ringbuf);
+
+	/*=============================== COLLECT PARAMETERS  ===========================*/
+
 	/* Parameter 1: fd (type: PT_FD)*/
-	s32 fd = (s32)args[0];
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)args[0];
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -70,13 +71,13 @@ int BPF_PROG(recvmsg_x,
 	{
 
 		/* Parameter 2: size (type: PT_UINT32) */
-		auxmap__store_u32_param(auxmap, (u32)ret);
+		auxmap__store_u32_param(auxmap, (uint32_t)ret);
 
 		/* We read the minimum between `snaplen` and what we really
 		 * have in the buffer.
 		 */
-		u16 snaplen = maps__get_snaplen();
-		apply_dynamic_snaplen(regs, &snaplen, true);
+		uint16_t snaplen = maps__get_snaplen();
+		apply_dynamic_snaplen(regs, &snaplen, true, NULL);
 		if(snaplen > ret)
 		{
 			snaplen = ret;
@@ -88,11 +89,19 @@ int BPF_PROG(recvmsg_x,
 
 		/* Parameter 3: data (type: PT_BYTEBUF) */
 		unsigned long msghdr_pointer = args[1];
-		auxmap__store_msghdr_data_param(auxmap, msghdr_pointer, snaplen);
+		struct user_msghdr msghhdr = auxmap__store_msghdr_data_param(auxmap, msghdr_pointer, snaplen);
 
 		/* Parameter 4: tuple (type: PT_SOCKTUPLE) */
-		u32 socket_fd = (u32)args[0];
-		auxmap__store_socktuple_param(auxmap, socket_fd, INBOUND);
+		uint32_t socket_fd = (uint32_t)args[0];
+		auxmap__store_socktuple_param(auxmap, socket_fd, INBOUND, msghhdr.msg_name);
+
+		/* Parameter 5: msg_control (type: PT_BYTEBUF) */
+		if (msghhdr.msg_control != NULL)
+		{
+			auxmap__store_bytebuf_param(auxmap, (unsigned long)msghhdr.msg_control, msghhdr.msg_controllen, USER);
+		} else {
+			auxmap__store_empty_param(auxmap);
+		}
 	}
 	else
 	{
@@ -103,6 +112,9 @@ int BPF_PROG(recvmsg_x,
 		auxmap__store_empty_param(auxmap);
 
 		/* Parameter 4: tuple (type: PT_SOCKTUPLE) */
+		auxmap__store_empty_param(auxmap);
+
+		/* Parameter 5: msg_control (type: PT_BYTEBUF) */
 		auxmap__store_empty_param(auxmap);
 	}
 

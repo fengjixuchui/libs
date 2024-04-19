@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,12 +21,14 @@ limitations under the License.
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "scap_const.h"
-#include "scap_zlib.h"
+#include <libscap/scap_const.h>
+#include <libscap/scap_zlib.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct scap_platform;
 
 typedef enum ppm_dumper_type
 {
@@ -47,7 +50,6 @@ typedef struct scap_dumper
 	char m_lasterr[SCAP_LASTERR_SIZE];
 } scap_dumper_t;
 
-typedef struct scap scap_t;
 struct scap_threadinfo;
 typedef struct ppm_evt_hdr scap_evt;
 struct iovec;
@@ -65,7 +67,7 @@ uint8_t* scap_get_memorydumper_curpos(scap_dumper_t *d);
 int32_t scap_write_proc_fds(scap_dumper_t *d, struct scap_threadinfo *tinfo);
 scap_dumper_t* scap_write_proclist_begin();
 int scap_write_proclist_end(scap_dumper_t *d, scap_dumper_t *proclist_dumper, uint32_t totlen);
-scap_dumper_t *scap_memory_dump_open(scap_t *handle, uint8_t* targetbuf, uint64_t targetbufsize);
+scap_dumper_t *scap_memory_dump_open(struct scap_platform* platform, uint8_t* targetbuf, uint64_t targetbufsize, char* lasterr);
 scap_dumper_t *scap_managedbuf_dump_create();
 
 // Variant of scap_write_proclist_entry where array-backed information
@@ -89,7 +91,8 @@ int32_t scap_write_proclist_entry_bufs(scap_dumper_t *d, struct scap_threadinfo 
 
   \return Dump handle that can be used to identify this specific dump instance.
 */
-scap_dumper_t* scap_dump_open(scap_t *handle, const char *fname, compression_mode compress, bool skip_proc_scan);
+scap_dumper_t *scap_dump_open(struct scap_platform *platform, const char *fname, compression_mode compress,
+			      char *lasterr);
 
 /*!
   \brief Open a trace file for writing, using the provided fd.
@@ -99,7 +102,7 @@ scap_dumper_t* scap_dump_open(scap_t *handle, const char *fname, compression_mod
 
   \return Dump handle that can be used to identify this specific dump instance.
 */
-scap_dumper_t* scap_dump_open_fd(scap_t *handle, int fd, compression_mode compress, bool skip_proc_scan);
+scap_dumper_t* scap_dump_open_fd(struct scap_platform* platform, int fd, compression_mode compress, bool skip_proc_scan, char* lasterr);
 
 /*!
   \brief Close a trace file.

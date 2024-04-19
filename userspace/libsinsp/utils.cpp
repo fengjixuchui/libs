@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,45 +16,44 @@ limitations under the License.
 
 */
 
-#ifndef _WIN32
-#include <unistd.h>
-#include <limits.h>
-#include <stdlib.h>
-#include <sys/time.h>
-#ifdef __GLIBC__
-#include <execinfo.h>
-#endif
-#include <unistd.h>
-#include <sys/time.h>
-#include <netdb.h>
-#include <strings.h>
-#include <sys/ioctl.h>
-#include <fnmatch.h>
-#include <string>
-#else
-#pragma comment(lib, "Ws2_32.lib")
-#include <WinSock2.h>
-#include "Shlwapi.h"
-#pragma comment(lib,"shlwapi.lib")
-#endif
-#include <algorithm>
-#include <functional>
-#include <errno.h>
-#include <sys/stat.h>
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
+#include <libsinsp/sinsp_errno.h>
+#include <libsinsp/sinsp_signal.h>
+#include <libsinsp/filter.h>
+#include <libsinsp/filter_check_list.h>
+#include <libsinsp/filterchecks.h>
+#include <libscap/strl.h>
 
-#include "sinsp.h"
-#include "sinsp_int.h"
-#include "sinsp_errno.h"
-#include "sinsp_signal.h"
-#include "filter.h"
-#include "filter_check_list.h"
-#include "filterchecks.h"
-#include "protodecoder.h"
-#include "uri.h"
-#include "strlcpy.h"
-#if !defined(_WIN32) && !defined(MINIMAL_BUILD)
-#include "curl/curl.h"
+#if !defined(_WIN32) && !defined(MINIMAL_BUILD) && !defined(__EMSCRIPTEN__)
+#include <curl/curl.h>
 #endif
+
+#ifndef _WIN32
+	#include <climits>
+	#include <cstdlib>
+	#include <cstring>
+	#ifdef __GLIBC__
+	#include <execinfo.h>
+	#endif
+	#include <fnmatch.h>
+	#include <netdb.h>
+	#include <string>
+	#include <sys/ioctl.h>
+	#include <sys/time.h>
+	#include <unistd.h>
+#else
+	#pragma comment(lib, "Ws2_32.lib")
+	#include <WinSock2.h>
+	#include "Shlwapi.h"
+	#pragma comment(lib,"shlwapi.lib")
+#endif
+
+#include <algorithm>
+#include <cerrno>
+#include <functional>
+#include <sys/stat.h>
+#include <filesystem>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -67,10 +67,7 @@ limitations under the License.
 // These are the libsinsp globals
 //
 sinsp_evttables g_infotables;
-sinsp_logger g_logger;
 sinsp_initializer g_initializer;
-sinsp_filter_check_list g_filterlist;
-sinsp_protodecoder_list g_decoderlist;
 
 //
 // loading time initializations
@@ -85,7 +82,7 @@ sinsp_initializer::sinsp_initializer()
 	//
 	// Init the logger
 	//
-	g_logger.set_severity(sinsp_logger::SEV_INFO);
+	libsinsp_logger()->set_severity(sinsp_logger::SEV_INFO);
 
 	//
 	// Sockets initialization on windows
@@ -95,10 +92,6 @@ sinsp_initializer::sinsp_initializer()
 	WORD version = MAKEWORD( 2, 0 );
 	WSAStartup( version, &wsaData );
 #endif
-}
-
-sinsp_initializer::~sinsp_initializer()
-{
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -480,9 +473,9 @@ bool sinsp_utils::sockinfo_to_str(sinsp_sockinfo* sinfo, scap_fd_type stype, cha
 			sinfo->m_ipv4info.m_fields.m_l4proto == SCAP_L4_UDP)
 		{
 			ipv4tuple addr;
-			addr.m_fields.m_sip = *(uint32_t*)sb;
+			addr.m_fields.m_sip = sinfo->m_ipv4info.m_fields.m_sip;
 			addr.m_fields.m_sport = sinfo->m_ipv4info.m_fields.m_sport;
-			addr.m_fields.m_dip = *(uint32_t*)db;
+			addr.m_fields.m_dip = sinfo->m_ipv4info.m_fields.m_dip;
 			addr.m_fields.m_dport = sinfo->m_ipv4info.m_fields.m_dport;
 			addr.m_fields.m_l4proto = sinfo->m_ipv4info.m_fields.m_l4proto;
 			std::string straddr = ipv4tuple_to_string(&addr, resolve);
@@ -526,9 +519,9 @@ bool sinsp_utils::sockinfo_to_str(sinsp_sockinfo* sinfo, scap_fd_type stype, cha
 			if(sinsp_utils::is_ipv4_mapped_ipv6(sip6) && sinsp_utils::is_ipv4_mapped_ipv6(dip6))
 			{
 				ipv4tuple addr;
-				addr.m_fields.m_sip = *(uint32_t*)sip;
+				memcpy(&addr.m_fields.m_sip, sip, sizeof(uint32_t));
 				addr.m_fields.m_sport = sinfo->m_ipv4info.m_fields.m_sport;
-				addr.m_fields.m_dip = *(uint32_t*)dip;
+				memcpy(&addr.m_fields.m_dip, dip, sizeof(uint32_t));
 				addr.m_fields.m_dport = sinfo->m_ipv4info.m_fields.m_dport;
 				addr.m_fields.m_l4proto = sinfo->m_ipv4info.m_fields.m_l4proto;
 				std::string straddr = ipv4tuple_to_string(&addr, resolve);
@@ -602,10 +595,27 @@ bool sinsp_utils::sockinfo_to_str(sinsp_sockinfo* sinfo, scap_fd_type stype, cha
 	return true;
 }
 
+std::filesystem::path workaround_win_root_name(std::filesystem::path p)
+{
+	if (!p.has_root_name())
+	{
+		return p;
+	}
+
+	if (p.root_name().string().rfind("//", 0) == 0)
+	{
+		// this is something like //dir/hello. Add a leading slash to identify an absolute path rooted at /
+		return std::filesystem::path("/" + p.string());
+	}
+
+	// last case: this is a relative path, like c:/dir/hello. Add a leading ./ to identify a relative path
+	return std::filesystem::path("./" + p.string());
+}
+
 //
 // Helper function to move a directory up in a path string
 //
-void rewind_to_parent_path(char* targetbase, char** tc, const char** pc, uint32_t delta)
+static inline void rewind_to_parent_path(const char* targetbase, char** tc, const char** pc, uint32_t delta)
 {
 	if(*tc <= targetbase + 1)
 	{
@@ -615,7 +625,7 @@ void rewind_to_parent_path(char* targetbase, char** tc, const char** pc, uint32_
 
 	(*tc)--;
 
-	while(*((*tc) - 1) != '/' && (*tc) >= targetbase + 1)
+	while((*tc) >= targetbase + 1 && *((*tc) - 1) != '/')
 	{
 		(*tc)--;
 	}
@@ -630,11 +640,12 @@ void rewind_to_parent_path(char* targetbase, char** tc, const char** pc, uint32_
 //                following parent directories
 //  - path: the path to copy
 //
-void copy_and_sanitize_path(char* target, char* targetbase, const char* path, char separator)
+static inline void copy_and_sanitize_path(char* target, char* targetbase, const char *path, char separator)
 {
 	char* tc = target;
 	const char* pc = path;
 	g_invalidchar ic;
+	const bool empty_base = target == targetbase;
 
 	while(true)
 	{
@@ -644,6 +655,7 @@ void copy_and_sanitize_path(char* target, char* targetbase, const char* path, ch
 
 			//
 			// If the path ends with a separator, remove it, as the OS does.
+			// Properly manage case where path is just "/".
 			//
 			if((tc > (targetbase + 1)) && (*(tc - 1) == separator))
 			{
@@ -712,9 +724,14 @@ void copy_and_sanitize_path(char* target, char* targetbase, const char* path, ch
 			else if(*pc == separator)
 			{
 				//
-				// separator, if the last char is already a separator, skip it
+				// separator:
+				// * if the last char is already a separator, skip it
+				// * if we are back at targetbase but targetbase was not empty before, it means we
+				//   fully rewinded back to targetbase and the string is now empty. Skip separator.
+				//   Example: "/foo/../a" -> "/a" BUT "foo/../a" -> "a"
+				//   -> Otherwise: "foo/../a" -> "/a"
 				//
-				if(tc > targetbase && *(tc - 1) == separator)
+				if((tc > targetbase && *(tc - 1) == separator) || (tc == targetbase && !empty_base))
 				{
 					pc++;
 				}
@@ -738,15 +755,14 @@ void copy_and_sanitize_path(char* target, char* targetbase, const char* path, ch
 	}
 }
 
-//
-// Return false if path2 is an absolute path
-//
-bool sinsp_utils::concatenate_paths(char* target,
-									uint32_t targetlen,
-									const char* path1,
-									uint32_t len1,
-									const char* path2,
-									uint32_t len2)
+/*
+ * Return false if path2 is an absolute path.
+ * path1 MUST be '/' terminated.
+ * path1 is not sanitized.
+ * If path2 is absolute, we only account for it.
+ */
+static inline bool concatenate_paths_(char* target, uint32_t targetlen, const char* path1, uint32_t len1,
+				      const char* path2, uint32_t len2)
 {
 	if(targetlen < (len1 + len2 + 1))
 	{
@@ -768,6 +784,15 @@ bool sinsp_utils::concatenate_paths(char* target,
 	}
 }
 
+std::string sinsp_utils::concatenate_paths(std::string_view path1, std::string_view path2)
+{
+	char fullpath[SCAP_MAX_PATH_SIZE];
+	concatenate_paths_(fullpath, SCAP_MAX_PATH_SIZE, path1.data(), (uint32_t)path1.length(), path2.data(),
+				  path2.size());
+	return std::string(fullpath);
+}
+
+
 bool sinsp_utils::is_ipv4_mapped_ipv6(uint8_t* paddr)
 {
 	if(paddr[0] == 0 && paddr[1] == 0 && paddr[2] == 0 && paddr[3] == 0 && paddr[4] == 0 &&
@@ -786,10 +811,10 @@ bool sinsp_utils::is_ipv4_mapped_ipv6(uint8_t* paddr)
 	}
 }
 
-const struct ppm_param_info* sinsp_utils::find_longest_matching_evt_param(std::string name)
+const ppm_param_info* sinsp_utils::find_longest_matching_evt_param(std::string name)
 {
 	uint32_t maxlen = 0;
-	const struct ppm_param_info* res = nullptr;
+	const ppm_param_info* res = nullptr;
 	const auto name_len = name.size();
 
 	for(uint32_t j = 0; j < PPM_EVENT_MAX; j++)
@@ -818,11 +843,6 @@ const struct ppm_param_info* sinsp_utils::find_longest_matching_evt_param(std::s
 	return res;
 }
 
-void sinsp_utils::get_filtercheck_fields_info(OUT std::vector<const filter_check_info*>& list)
-{
-	g_filterlist.get_all_fields(list);
-}
-
 uint64_t sinsp_utils::get_current_time_ns()
 {
     struct timeval tv;
@@ -831,64 +851,14 @@ uint64_t sinsp_utils::get_current_time_ns()
     return tv.tv_sec * (uint64_t) 1000000000 + tv.tv_usec * 1000;
 }
 
-bool sinsp_utils::glob_match(const char *pattern, const char *string)
+bool sinsp_utils::glob_match(const char *pattern, const char *string, const bool& case_insensitive)
 {
 #ifdef _WIN32
 	return PathMatchSpec(string, pattern) == TRUE;
 #else
-	int flags = 0;
+	int flags = case_insensitive ? FNM_CASEFOLD : 0;
 	return fnmatch(pattern, string, flags) == 0;
 #endif
-}
-
-#ifndef CYGWING_AGENT
-#ifndef _WIN32
-#ifdef __GLIBC__
-void sinsp_utils::bt(void)
-{
-	static const char start[] = "BACKTRACE ------------";
-	static const char end[] = "----------------------";
-
-	void *bt[1024];
-	int bt_size;
-	char **bt_syms;
-	int i;
-
-	bt_size = backtrace(bt, 1024);
-	bt_syms = backtrace_symbols(bt, bt_size);
-	g_logger.format("%s", start);
-	for (i = 1; i < bt_size; i++)
-	{
-		g_logger.format("%s", bt_syms[i]);
-	}
-	g_logger.format("%s", end);
-
-	free(bt_syms);
-}
-#endif // __GLIBC__
-#endif // _WIN32
-#endif // CYGWING_AGENT
-
-bool sinsp_utils::find_first_env(std::string &out, const std::vector<std::string> &env, const std::vector<std::string> &keys)
-{
-	for (const auto& key : keys)
-	{
-		for(const auto& env_var : env)
-		{
-			if((env_var.size() > key.size()) && !env_var.compare(0, key.size(), key) && (env_var[key.size()] == '='))
-			{
-				out = env_var.substr(key.size()+1);
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
-bool sinsp_utils::find_env(std::string &out, const std::vector<std::string> &env, const std::string &key)
-{
-	const std::vector<std::string> keys = { key };
-	return find_first_env(out, env, keys);
 }
 
 void sinsp_utils::split_container_image(const std::string &image,
@@ -955,28 +925,41 @@ void sinsp_utils::split_container_image(const std::string &image,
 	}
 }
 
-void sinsp_utils::parse_suppressed_types(const std::vector<std::string> &supp_strs,
-					 std::vector<uint16_t> *supp_ids)
+static int32_t gmt2local(time_t t)
 {
-	for (auto ii = 0; ii < PPM_EVENT_MAX; ii++)
-	{
-		auto iter = std::find(supp_strs.begin(), supp_strs.end(),
-				      event_name_by_id(ii));
-		if (iter != supp_strs.end())
-		{
-			supp_ids->push_back(ii);
-		}
-	}
-}
+	int dt, dir;
+	struct tm *gmt, *tmp_gmt, *loc;
+	struct tm sgmt;
 
-const char* sinsp_utils::event_name_by_id(uint16_t id)
-{
-	if (id >= PPM_EVENT_MAX)
+	if(t == 0)
 	{
-		ASSERT(false);
-		return "NA";
+		t = time(NULL);
 	}
-	return g_infotables.m_event_info[id].name;
+
+	gmt = &sgmt;
+	tmp_gmt = gmtime(&t);
+	if (tmp_gmt == NULL)
+	{
+		throw sinsp_exception("cannot get gmtime");
+	}
+	*gmt = *tmp_gmt;
+	loc = localtime(&t);
+	if(loc == NULL)
+	{
+		throw sinsp_exception("cannot get localtime");
+	}
+
+	dt = (loc->tm_hour - gmt->tm_hour) * 60 * 60 + (loc->tm_min - gmt->tm_min) * 60;
+
+	dir = loc->tm_year - gmt->tm_year;
+	if(dir == 0)
+	{
+		dir = loc->tm_yday - gmt->tm_yday;
+	}
+
+	dt += dir * 24 * 60 * 60;
+
+	return dt;
 }
 
 void sinsp_utils::ts_to_string(uint64_t ts, OUT std::string* res, bool date, bool ns)
@@ -1052,36 +1035,6 @@ void sinsp_utils::ts_to_iso_8601(uint64_t ts, OUT std::string* res)
 // Time utility functions.
 ///////////////////////////////////////////////////////////////////////////////
 
-bool sinsp_utils::parse_iso_8601_utc_string(const std::string& time_str, uint64_t &ns)
-{
-#ifndef _WIN32
-	char *rem;
-
-	struct tm tm_time = {0};
-	rem = strptime(time_str.c_str(), "%Y-%m-%dT%H:%M:", &tm_time);
-	if(rem == NULL || *rem == '\0')
-	{
-		return false;
-	}
-	tm_time.tm_isdst = -1; // strptime does not set this, signal timegm to determine DST
-	ns = timegm(&tm_time) * ONE_SECOND_IN_NS;
-
-	// Handle the possibly fractional seconds now. Also verify
-	// that the string ends with Z.
-	double fractional_secs;
-	if(sscanf(rem, "%lfZ", &fractional_secs) != 1)
-	{
-		return false;
-	}
-
-	ns += (fractional_secs * ONE_SECOND_IN_NS);
-
-	return true;
-#else
-	throw sinsp_exception("parse_iso_8601_utc_string() not implemented on Windows");
-#endif
-}
-
 time_t get_epoch_utc_seconds(const std::string& time_str, const std::string& fmt)
 {
 #ifndef _WIN32
@@ -1089,7 +1042,7 @@ time_t get_epoch_utc_seconds(const std::string& time_str, const std::string& fmt
 	{
 		throw sinsp_exception("get_epoch_utc_seconds(): empty time or format string.");
 	}
-	struct tm tm_time = {0};
+	tm tm_time{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	strptime(time_str.c_str(), fmt.c_str(), &tm_time);
 	tm_time.tm_isdst = -1; // strptime does not set this, signal timegm to determine DST
 	return timegm(&tm_time);
@@ -1264,23 +1217,22 @@ std::string ipv6serveraddr_to_string(ipv6serverinfo* addr, bool resolve)
 	return std::string(buf);
 }
 
-std::string ipv6tuple_to_string(_ipv6tuple* tuple, bool resolve)
+std::string ipv6tuple_to_string(ipv6tuple* tuple, bool resolve)
 {
-	char source_address[100];
-	char destination_address[100];
-	char buf[200];
-
+	char source_address[INET6_ADDRSTRLEN];
 	if(NULL == inet_ntop(AF_INET6, tuple->m_fields.m_sip.m_b, source_address, 100))
 	{
 		return std::string();
 	}
 
+	char destination_address[INET6_ADDRSTRLEN];
 	if(NULL == inet_ntop(AF_INET6, tuple->m_fields.m_dip.m_b, destination_address, 100))
 	{
 		return std::string();
 	}
 
-	snprintf(buf,200,"%s:%s->%s:%s",
+	char buf[200];
+	snprintf(buf, sizeof(buf), "%s:%s->%s:%s",
 		source_address,
 		port_to_string(tuple->m_fields.m_sport, tuple->m_fields.m_l4proto, resolve).c_str(),
 		destination_address,
@@ -1480,26 +1432,6 @@ std::string replace(const std::string& str, const std::string& search, const std
 	return s;
 }
 
-
-bool sinsp_utils::endswith(const std::string& str, const std::string& ending)
-{
-	if (ending.size() <= str.size())
-	{
-		return (0 == str.compare(str.length() - ending.length(), ending.length(), ending));
-	}
-	return false;
-}
-
-
-bool sinsp_utils::endswith(const char *str, const char *ending, uint32_t lstr, uint32_t lend)
-{
-	if (lstr >= lend)
-	{
-		return (0 == memcmp(ending, str + (lstr - lend), lend));
-	}
-	return 0;
-}
-
 bool sinsp_utils::startswith(const std::string& s, const std::string& prefix)
 {
 	if(prefix.empty())
@@ -1518,7 +1450,7 @@ bool sinsp_utils::startswith(const std::string& s, const std::string& prefix)
 
 bool sinsp_utils::unhex(const std::vector<char> &hex_chars, std::vector<char> &hex_bytes)
 {
-	if(hex_chars.size() % 2 != 0 || 
+	if(hex_chars.size() % 2 != 0 ||
 		!std::all_of(hex_chars.begin(), hex_chars.end(), [](unsigned char c){ return std::isxdigit(c); }))
 	{
 		return false;
@@ -1534,7 +1466,7 @@ bool sinsp_utils::unhex(const std::vector<char> &hex_chars, std::vector<char> &h
 		ss.str(std::string());
 		ss.clear();
 	}
-	
+
 	return true;
 }
 
@@ -1588,7 +1520,7 @@ std::string sinsp_utils::caps_to_string(const uint64_t caps)
 
 	for(size_t i = 0; i < capabilities.size(); ++i)
 	{
-		uint64_t current_cap = (uint64_t)1 << i; 
+		uint64_t current_cap = (uint64_t)1 << i;
 		if(caps & current_cap)
 		{
 			res += capabilities[i];
@@ -1873,9 +1805,10 @@ unsigned int read_num_possible_cpus(void)
 ///////////////////////////////////////////////////////////////////////////////
 // Log helper
 ///////////////////////////////////////////////////////////////////////////////
-void sinsp_scap_debug_log_fn(const char* msg)
+void sinsp_scap_log_fn(const char* component, const char* msg, falcosecurity_log_severity sev)
 {
-	g_logger.log(msg, sinsp_logger::SEV_DEBUG);
+	std::string prefix = (component == NULL) ? "" : std::string(component) + ": ";
+	libsinsp_logger()->log(prefix + msg, (sinsp_logger::severity)sev);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

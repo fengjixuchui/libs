@@ -1,6 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
 #
-# libcurl
+# Copyright (C) 2023 The Falco Authors.
 #
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations under the License.
+#
+
 option(USE_BUNDLED_CURL "Enable building of the bundled curl" ${USE_BUNDLED_DEPS})
 
 include(openssl)
@@ -43,8 +54,8 @@ else()
 			curl
 			PREFIX "${PROJECT_BINARY_DIR}/curl-prefix"
 			DEPENDS openssl zlib
-			URL "https://github.com/curl/curl/releases/download/curl-8_0_1/curl-8.0.1.tar.bz2"
-			URL_HASH "SHA256=9b6b1e96b748d04b968786b6bdf407aa5c75ab53a3d37c1c8c81cdb736555ccf"
+			URL "https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.bz2"
+			URL_HASH "SHA256=05bbd2b698e9cfbab477c33aa5e99b4975501835a41b7ca6ca71de03d8849e76"
 			CONFIGURE_COMMAND
 			./configure
 			${CURL_SSL_OPTION}
@@ -84,7 +95,7 @@ else()
 			--disable-threaded-resolver
 			--without-brotli
 			--without-zstd
-			BUILD_COMMAND ${CMD_MAKE}
+			BUILD_COMMAND make
 			BUILD_IN_SOURCE 1
 			BUILD_BYPRODUCTS ${CURL_LIBRARIES}
 			INSTALL_COMMAND "")

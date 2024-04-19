@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,24 +31,23 @@ limitations under the License.
 #include <ctype.h>
 #include <time.h>
 #include <dirent.h>
-#include "strlcpy.h"
+#include <libscap/strl.h>
 
 #define SCAP_HANDLE_T struct bpf_engine
 
-#include "bpf.h"
-#include "engine_handle.h"
-#include "scap.h"
-#include "scap-int.h"
-#include "scap_bpf.h"
-#include "scap_engine_util.h"
-#include "driver_config.h"
-#include "../../driver/bpf/types.h"
-#include "../../driver/bpf/maps.h"
-#include "compat/misc.h"
-#include "compat/bpf.h"
-#include "strlcpy.h"
-#include "noop.h"
-#include "strerror.h"
+#include <libscap/engine/bpf/bpf.h>
+#include <libscap/engine_handle.h>
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
+#include <libscap/engine/bpf/scap_bpf.h>
+#include <libscap/scap_engine_util.h>
+#include <driver_config.h>
+#include <driver/bpf/types.h>
+#include <driver/bpf/maps.h>
+#include <libscap/compat/misc.h>
+#include <libscap/compat/bpf.h>
+#include <libscap/strl.h>
+#include <libscap/strerror.h>
 
 static const char * const bpf_kernel_counters_stats_names[] = {
 	[BPF_N_EVTS] = "n_evts",
@@ -64,6 +64,8 @@ static const char * const bpf_kernel_counters_stats_names[] = {
 	[BPF_N_DROPS_BUFFER_DIR_FILE_EXIT] = "n_drops_buffer_dir_file_exit",
 	[BPF_N_DROPS_BUFFER_OTHER_INTEREST_ENTER] = "n_drops_buffer_other_interest_enter",
 	[BPF_N_DROPS_BUFFER_OTHER_INTEREST_EXIT] = "n_drops_buffer_other_interest_exit",
+	[BPF_N_DROPS_BUFFER_CLOSE_EXIT] = "n_drops_buffer_close_exit",
+	[BPF_N_DROPS_BUFFER_PROC_EXIT] = "n_drops_buffer_proc_exit",
 	[BPF_N_DROPS_SCRATCH_MAP] = "n_drops_scratch_map",
 	[BPF_N_DROPS_PAGE_FAULTS] = "n_drops_page_faults",
 	[BPF_N_DROPS_BUG] = "n_drops_bug",
@@ -95,7 +97,7 @@ static inline void scap_bpf_advance_to_next_evt(scap_device* dev, scap_evt *even
 #define READBUF scap_bpf_readbuf
 #define NEXT_EVENT scap_bpf_next_event
 
-#include "ringbuffer/ringbuffer.h"
+#include <libscap/ringbuffer/ringbuffer.h>
 
 //
 // Some of this code is taken from the kernel samples under samples/bpf,
@@ -126,6 +128,7 @@ static struct bpf_engine* alloc_handle(scap_t* main_handle, char* lasterr_ptr)
 		for(int j=0; j < BPF_PROG_ATTACHED_MAX; j++)
 		{
 			engine->m_attached_progs[j].fd = -1;
+			engine->m_attached_progs[j].efd = -1;
 		}
 	}
 	return engine;
@@ -136,7 +139,9 @@ static void free_handle(struct scap_engine_handle engine)
 	free(engine.m_handle);
 }
 
+#ifndef UINT32_MAX
 # define UINT32_MAX (4294967295U)
+#endif
 
 /* Recommended log buffer size.
  * Taken from libbpf source code: https://github.com/libbpf/libbpf/blob/67a4b1464349345e483df26ed93f8d388a60cee1/src/bpf.h#L201
@@ -455,7 +460,7 @@ static int32_t load_maps(struct bpf_engine *handle, struct bpf_map_data *maps, i
 }
 
 static int32_t parse_relocations(struct bpf_engine *handle, Elf_Data *data, Elf_Data *symbols,
-				 GElf_Shdr *shdr, struct bpf_insn *insn,
+				 GElf_Shdr *shdr, struct bpf_insn *insns,
 				 struct bpf_map_data *maps, int nr_maps)
 {
 	int nrels;
@@ -475,14 +480,18 @@ static int32_t parse_relocations(struct bpf_engine *handle, Elf_Data *data, Elf_
 
 		insn_idx = rel.r_offset / sizeof(struct bpf_insn);
 
+		struct bpf_insn insn;
+
 		gelf_getsym(symbols, GELF_R_SYM(rel.r_info), &sym);
 
-		if(insn[insn_idx].code != (BPF_LD | BPF_IMM | BPF_DW))
+		memcpy(&insn, &insns[insn_idx], sizeof(insn));
+
+		if(insn.code != (BPF_LD | BPF_IMM | BPF_DW))
 		{
-			return scap_errprintf(handle->m_lasterr, 0, "invalid relocation for insn[%d].code 0x%x", insn_idx, insn[insn_idx].code);
+			return scap_errprintf(handle->m_lasterr, 0, "invalid relocation for insn[%d].code 0x%x", insn_idx, insn.code);
 		}
 
-		insn[insn_idx].src_reg = BPF_PSEUDO_MAP_FD;
+		insn.src_reg = BPF_PSEUDO_MAP_FD;
 
 		for(map_idx = 0; map_idx < nr_maps; map_idx++)
 		{
@@ -495,7 +504,8 @@ static int32_t parse_relocations(struct bpf_engine *handle, Elf_Data *data, Elf_
 
 		if(match)
 		{
-			insn[insn_idx].imm = maps[map_idx].fd;
+			insn.imm = maps[map_idx].fd;
+			memcpy(&insns[insn_idx], &insn, sizeof(insn));
 		}
 		else
 		{
@@ -559,7 +569,7 @@ static int32_t load_single_prog(struct bpf_engine* handle, const char *event, st
 	{
 		/* It is possible than some old kernels don't support the prog_name so in case
 		 * of loading failure, we try again the loading without the name. See it in libbpf:
-		 * https://github.com/torvalds/linux/blob/master/tools/lib/bpf/libbpf.c#L4926
+		 * https://github.com/torvalds/linux/blob/16a8829130ca22666ac6236178a6233208d425c3/tools/lib/bpf/libbpf.c#L4833
 		 */
 		fd = bpf_load_program(prog, program_type, insns_cnt, error, BPF_LOG_SIZE, NULL);
 		if(fd < 0)
@@ -846,7 +856,7 @@ static int load_all_progs(struct bpf_engine *handle)
 	return SCAP_SUCCESS;
 }
 
-static int allocate_scap_stats_v2(struct bpf_engine *handle)
+static int allocate_metrics_v2(struct bpf_engine *handle)
 {
 	int nprogs_attached = 0;
 	for(int j=0; j < BPF_PROG_ATTACHED_MAX; j++)
@@ -857,7 +867,7 @@ static int allocate_scap_stats_v2(struct bpf_engine *handle)
 		}
 	}
 	handle->m_nstats = (BPF_MAX_KERNEL_COUNTERS_STATS + (nprogs_attached * BPF_MAX_LIBBPF_STATS));
-	handle->m_stats = (scap_stats_v2 *)malloc(handle->m_nstats * sizeof(scap_stats_v2));
+	handle->m_stats = (metrics_v2*)malloc(handle->m_nstats * sizeof(metrics_v2));
 
 	if(!handle->m_stats)
 	{
@@ -981,6 +991,28 @@ static int32_t populate_fillers_table_map(struct bpf_engine *handle)
 	return bpf_map_freeze(handle->m_bpf_map_fds[SCAP_FILLERS_TABLE]);
 }
 
+static int32_t populate_ia32_to_64_map(struct bpf_engine *handle)
+{
+	int j;
+	int ret;
+
+	for(j = 0; j < SYSCALL_TABLE_SIZE; ++j)
+	{
+		// Note: we will map all syscalls from the upper limit of the ia32 table
+		// up to SYSCALL_TABLE_SIZE to 0 (because they are not set in the g_ia32_64_map).
+		// 0 is read on x86_64; this is not a problem though because
+		// we will never receive a 32bit syscall above the upper limit, since it won't be existent
+		const int *x64_val = &g_ia32_64_map[j];
+		if((ret = bpf_map_update_elem(handle->m_bpf_map_fds[SCAP_IA32_64_MAP], &j, x64_val,
+					      BPF_ANY)) != 0)
+		{
+			return scap_errprintf(handle->m_lasterr, -ret,
+					      "SCAP_FILLERS_TABLE bpf_map_update_elem ");
+		}
+	}
+	return bpf_map_freeze(handle->m_bpf_map_fds[SCAP_IA32_64_MAP]);
+}
+
 static int enforce_sc_set(struct bpf_engine* handle)
 {
 	/* handle->capturing == false means that we want to disable the capture */
@@ -1095,6 +1127,22 @@ static int enforce_sc_set(struct bpf_engine* handle)
 int32_t scap_bpf_start_capture(struct scap_engine_handle engine)
 {
 	struct bpf_engine* handle = engine.m_handle;
+	int32_t rc = 0;
+	/* Here we are covering the case in which some syscalls don't have an associated ppm_sc
+	 * and so we cannot set them as (un)interesting. For this reason, we default them to 0.
+	 * Please note this is an extra check since our ppm_sc should already cover all possible syscalls.
+	 * Ideally we should do this only once, but right now in our code we don't have a "right" place to do it.
+	 * We need to move it, if `scap_start_capture` will be called frequently in our flow, right now in live mode, it
+	 * should be called only once...
+	 */
+	for(int i = 0; i < SYSCALL_TABLE_SIZE; i++)
+	{
+		rc = set_single_syscall_of_interest(handle, i, false);
+		if(rc != SCAP_SUCCESS)
+		{
+			return rc;
+		}
+	}
 	handle->capturing = true;
 	return enforce_sc_set(handle);
 }
@@ -1293,27 +1341,6 @@ int32_t scap_bpf_enable_dynamic_snaplen(struct scap_engine_handle engine)
 	return SCAP_SUCCESS;
 }
 
-int32_t scap_bpf_enable_tracers_capture(struct scap_engine_handle engine)
-{
-	struct scap_bpf_settings settings;
-	struct bpf_engine *handle = engine.m_handle;
-	int k = 0;
-	int ret;
-
-	if((ret = bpf_map_lookup_elem(handle->m_bpf_map_fds[SCAP_SETTINGS_MAP], &k, &settings)) != 0)
-	{
-		return scap_errprintf(handle->m_lasterr, -ret, "SCAP_SETTINGS_MAP bpf_map_lookup_elem");
-	}
-
-	settings.tracers_enabled = true;
-	if((ret = bpf_map_update_elem(handle->m_bpf_map_fds[SCAP_SETTINGS_MAP], &k, &settings, BPF_ANY)) != 0)
-	{
-		return scap_errprintf(handle->m_lasterr, -ret, "SCAP_SETTINGS_MAP bpf_map_update_elem");
-	}
-
-	return SCAP_SUCCESS;
-}
-
 int32_t scap_bpf_close(struct scap_engine_handle engine)
 {
 	struct bpf_engine *handle = engine.m_handle;
@@ -1440,7 +1467,6 @@ static int32_t set_default_settings(struct bpf_engine *handle)
 	settings.dropping_mode = false;
 	settings.is_dropping = false;
 	settings.drop_failed = false;
-	settings.tracers_enabled = false;
 	settings.fullcapture_port_range_start = 0;
 	settings.fullcapture_port_range_end = 0;
 	settings.statsd_port = PPM_PORT_STATSD;
@@ -1461,8 +1487,6 @@ int32_t scap_bpf_load(
 	const char *bpf_probe,
 	scap_open_args *oargs)
 {
-	int online_cpu;
-	int j;
 	struct scap_bpf_engine_params* bpf_args = oargs->engine_params;
 
 	if(set_runtime_params(handle) != SCAP_SUCCESS)
@@ -1491,10 +1515,10 @@ int32_t scap_bpf_load(
 		return SCAP_FAILURE;
 	}
 
-	/* allocate_scap_stats_v2 dynamically based on number of valid m_attached_progs,
+	/* allocate_metrics_v2 dynamically based on number of valid m_attached_progs,
 	 * In the future, it may change when and how we perform the allocation.
 	 */
-	if(allocate_scap_stats_v2(handle) != SCAP_SUCCESS)
+	if(allocate_metrics_v2(handle) != SCAP_SUCCESS)
 	{
 		return SCAP_FAILURE;
 	}
@@ -1514,28 +1538,36 @@ int32_t scap_bpf_load(
 		return SCAP_FAILURE;
 	}
 
+	if (populate_ia32_to_64_map(handle) != SCAP_SUCCESS)
+	{
+		return SCAP_FAILURE;
+	}
+
 	//
 	// Open and initialize all the devices
 	//
-	online_cpu = 0;
-	for(j = 0; j < handle->m_ncpus; ++j)
+	struct scap_device_set *devset = &handle->m_dev_set;
+	uint32_t online_idx = 0;
+	// devset->m_ndevs = online CPUs in the system.
+	// handle->m_ncpus = available CPUs in the system.
+	for(uint32_t cpu_idx = 0; online_idx < devset->m_ndevs && cpu_idx < handle->m_ncpus; ++cpu_idx)
 	{
 		struct perf_event_attr attr = {
 			.sample_type = PERF_SAMPLE_RAW,
 			.type = PERF_TYPE_SOFTWARE,
 			.config = PERF_COUNT_SW_BPF_OUTPUT,
 		};
-		int pmu_fd;
-		int ret;
-		struct scap_device *dev;
+		int pmu_fd = 0;
+		int ret = 0;
 
-		if(j > 0)
+		/* We suppose that CPU 0 is always online, so we only check for cpu_idx > 0 */
+		if(cpu_idx > 0)
 		{
 			char filename[SCAP_MAX_PATH_SIZE];
-			int online;
 			FILE *fp;
+			int online = 0;
 
-			snprintf(filename, sizeof(filename), "/sys/devices/system/cpu/cpu%d/online", j);
+			snprintf(filename, sizeof(filename), "/sys/devices/system/cpu/cpu%d/online", cpu_idx);
 
 			fp = fopen(filename, "r");
 			if(fp == NULL)
@@ -1544,15 +1576,15 @@ int32_t scap_bpf_load(
 				// Fallback at considering them online if we can at least reach their folder.
 				// This is useful for example for raspPi devices.
 				// See: https://github.com/kubernetes/kubernetes/issues/95039
-				snprintf(filename, sizeof(filename), "/sys/devices/system/cpu/cpu%d/", j);
+				snprintf(filename, sizeof(filename), "/sys/devices/system/cpu/cpu%d/", cpu_idx);
 				if (access(filename, F_OK) == 0)
 				{
 					online = 1;
 				}
-				else
-				{
-					return scap_errprintf(handle->m_lasterr, errno, "can't open %sonline", filename);
-				}
+				// If we can't access the cpu, count it as offline.
+				// Some VMs or hyperthreading systems export an high number of configured CPUs,
+				// even if they are not existing. See https://github.com/falcosecurity/falco/issues/2843 for example.
+				// Skip them.
 			}
 			else
 			{
@@ -1572,29 +1604,23 @@ int32_t scap_bpf_load(
 			}
 		}
 
-		if(online_cpu >= handle->m_dev_set.m_ndevs)
-		{
-			return scap_errprintf(handle->m_lasterr, 0, "too many online processors: %d, expected: %d", online_cpu, handle->m_dev_set.m_ndevs);
-		}
-
-		dev = &handle->m_dev_set.m_devs[online_cpu];
-
-		pmu_fd = sys_perf_event_open(&attr, -1, j, -1, 0);
+		pmu_fd = sys_perf_event_open(&attr, -1, cpu_idx, -1, 0);
 		if(pmu_fd < 0)
 		{
-			return scap_errprintf(handle->m_lasterr, -pmu_fd, "unable to open the perf-buffer for cpu '%d'", j);
+			return scap_errprintf(handle->m_lasterr, -pmu_fd, "unable to open the perf-buffer for cpu '%d'", cpu_idx);
 		}
 
+		struct scap_device *dev = &devset->m_devs[online_idx];
 		dev->m_fd = pmu_fd;
 
-		if((ret = bpf_map_update_elem(handle->m_bpf_map_fds[SCAP_PERF_MAP], &j, &pmu_fd, BPF_ANY)) != 0)
+		if((ret = bpf_map_update_elem(handle->m_bpf_map_fds[SCAP_PERF_MAP], &cpu_idx, &pmu_fd, BPF_ANY)) != 0)
 		{
-			return scap_errprintf(handle->m_lasterr, -ret, "unable to update the SCAP_PERF_MAP map for cpu '%d'", j);
+			return scap_errprintf(handle->m_lasterr, -ret, "unable to update the SCAP_PERF_MAP map for cpu '%d'", cpu_idx);
 		}
 
 		if(ioctl(pmu_fd, PERF_EVENT_IOC_ENABLE, 0))
 		{
-			return scap_errprintf(handle->m_lasterr, errno, "unable to call PERF_EVENT_IOC_ENABLE on the fd for cpu '%d'", j);
+			return scap_errprintf(handle->m_lasterr, errno, "unable to call PERF_EVENT_IOC_ENABLE on the fd for cpu '%d'", cpu_idx);
 		}
 
 		//
@@ -1604,16 +1630,28 @@ int32_t scap_bpf_load(
 		dev->m_buffer_size = bpf_args->buffer_bytes_dim;
 		if(dev->m_buffer == MAP_FAILED)
 		{
-			return scap_errprintf(handle->m_lasterr, errno, "unable to mmap the perf-buffer for cpu '%d'", j);
+			return scap_errprintf(handle->m_lasterr, errno, "unable to mmap the perf-buffer for cpu '%d'", cpu_idx);
 		}
-
-		++online_cpu;
+		online_idx++;
 	}
 
-	if(online_cpu != handle->m_dev_set.m_ndevs)
+	// Check that we parsed all online CPUs
+	if(online_idx != devset->m_ndevs)
 	{
-		return scap_errprintf(handle->m_lasterr, 0, "processors online: %d, expected: %d", online_cpu, handle->m_dev_set.m_ndevs);
+		return scap_errprintf(handle->m_lasterr, 0, "mismatch, processors online after the 'for' loop: %d, '_SC_NPROCESSORS_ONLN' before the 'for' loop: %d", online_idx, devset->m_ndevs);
 	}
+
+	// Check that no CPUs were hotplugged during the for loop
+	uint32_t final_ndevs = sysconf(_SC_NPROCESSORS_ONLN);
+	if(final_ndevs == -1)
+	{
+		return scap_errprintf(handle->m_lasterr, errno, "cannot obtain the number of online CPUs from '_SC_NPROCESSORS_ONLN' to check against the previous value");
+	}
+	if (online_idx != final_ndevs)
+	{
+		return scap_errprintf(handle->m_lasterr, 0, "mismatch, processors online after the 'for' loop: %d, '_SC_NPROCESSORS_ONLN' after the 'for' loop: %d", online_idx, final_ndevs);
+	}
+
 
 	if(set_default_settings(handle) != SCAP_SUCCESS)
 	{
@@ -1651,6 +1689,8 @@ int32_t scap_bpf_get_stats(struct scap_engine_handle engine, OUT scap_stats* sta
 		stats->n_drops_buffer_dir_file_exit += v.n_drops_buffer_dir_file_exit;
 		stats->n_drops_buffer_other_interest_enter += v.n_drops_buffer_other_interest_enter;
 		stats->n_drops_buffer_other_interest_exit += v.n_drops_buffer_other_interest_exit;
+		stats->n_drops_buffer_close_exit += v.n_drops_buffer_close_exit;
+		stats->n_drops_buffer_proc_exit += v.n_drops_buffer_proc_exit;
 		stats->n_drops_scratch_map += v.n_drops_scratch_map;
 		stats->n_drops_pf += v.n_drops_pf;
 		stats->n_drops_bug += v.n_drops_bug;
@@ -1663,7 +1703,7 @@ int32_t scap_bpf_get_stats(struct scap_engine_handle engine, OUT scap_stats* sta
 	return SCAP_SUCCESS;
 }
 
-const struct scap_stats_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
+const struct metrics_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
 {
 	struct bpf_engine *handle = engine.m_handle;
 	int ret;
@@ -1671,22 +1711,30 @@ const struct scap_stats_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engi
 	int offset = 0; // offset in stats buffer
 	*nstats = 0;
 	uint32_t nstats_allocated = handle->m_nstats;
-	scap_stats_v2* stats = handle->m_stats;
+	metrics_v2* stats = handle->m_stats;
 	if (!stats)
 	{
 		*rc = SCAP_FAILURE;
 		return NULL;
 	}
 
-	if ((flags & PPM_SCAP_STATS_KERNEL_COUNTERS) && (BPF_MAX_KERNEL_COUNTERS_STATS <= nstats_allocated))
+	// we can't collect libbpf stats if bpf stats are not enabled
+	if (!(handle->m_flags & ENGINE_FLAG_BPF_STATS_ENABLED))
+	{
+		flags &= ~METRICS_V2_LIBBPF_STATS;
+	}
+
+	if ((flags & METRICS_V2_KERNEL_COUNTERS) && (BPF_MAX_KERNEL_COUNTERS_STATS <= nstats_allocated))
 	{
 		/* KERNEL SIDE STATS COUNTERS */
 		for(int stat = 0; stat < BPF_MAX_KERNEL_COUNTERS_STATS; stat++)
 		{
-			stats[stat].type = STATS_VALUE_TYPE_U64;
-			stats[stat].flags = PPM_SCAP_STATS_KERNEL_COUNTERS;
+			stats[stat].type = METRIC_VALUE_TYPE_U64;
+			stats[stat].flags = METRICS_V2_KERNEL_COUNTERS;
+			stats[stat].metric_type = METRIC_VALUE_METRIC_TYPE_MONOTONIC;
+			stats[stat].unit = METRIC_VALUE_UNIT_COUNT;
 			stats[stat].value.u64 = 0;
-			strlcpy(stats[stat].name, bpf_kernel_counters_stats_names[stat], STATS_NAME_MAX);
+			strlcpy(stats[stat].name, bpf_kernel_counters_stats_names[stat], METRIC_NAME_MAX);
 		}
 
 		for(int cpu = 0; cpu < handle->m_ncpus; cpu++)
@@ -1711,6 +1759,8 @@ const struct scap_stats_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engi
 			stats[BPF_N_DROPS_BUFFER_DIR_FILE_EXIT].value.u64 += v.n_drops_buffer_dir_file_exit;
 			stats[BPF_N_DROPS_BUFFER_OTHER_INTEREST_ENTER].value.u64 += v.n_drops_buffer_other_interest_enter;
 			stats[BPF_N_DROPS_BUFFER_OTHER_INTEREST_EXIT].value.u64 += v.n_drops_buffer_other_interest_exit;
+			stats[BPF_N_DROPS_BUFFER_CLOSE_EXIT].value.u64 += v.n_drops_buffer_close_exit;
+			stats[BPF_N_DROPS_BUFFER_PROC_EXIT].value.u64 += v.n_drops_buffer_proc_exit;
 			stats[BPF_N_DROPS_SCRATCH_MAP].value.u64 += v.n_drops_scratch_map;
 			stats[BPF_N_DROPS_PAGE_FAULTS].value.u64 += v.n_drops_pf;
 			stats[BPF_N_DROPS_BUG].value.u64 += v.n_drops_bug;
@@ -1729,8 +1779,11 @@ const struct scap_stats_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engi
 	 * Hopefully someone upstreams such capabilities to libbpf one day :)
 	 * Meanwhile, we can simulate perf comparisons between future LSM hooks and sys enter and exit tracepoints
 	 * via leveraging syscall selection mechanisms `handle->curr_sc_set`.
+	 *
+	 * Please note that libbpf stats are available only on kernels >= 5.1, they could be backported but
+	 * it's possible that in some of our supported kernels they won't be available.
 	 */
-	if ((flags & PPM_SCAP_STATS_LIBBPF_STATS))
+	if ((flags & METRICS_V2_LIBBPF_STATS))
 	{
 		for(int bpf_prog = 0; bpf_prog < BPF_PROG_ATTACHED_MAX; bpf_prog++)
 		{
@@ -1742,7 +1795,7 @@ const struct scap_stats_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engi
 			}
 			struct bpf_prog_info info = {};
 			__u32 len = sizeof(info);
-			if((bpf_obj_get_info_by_fd(fd, &info, &len)))
+			if((ret = bpf_obj_get_info_by_fd(fd, &info, &len)))
 			{
 				*rc = scap_errprintf(handle->m_lasterr, -ret, "Error getting bpf prog info for fd %d", fd);
 				continue;
@@ -1754,28 +1807,47 @@ const struct scap_stats_v2* scap_bpf_get_stats_v2(struct scap_engine_handle engi
 				{
 					break;
 				}
-				stats[offset].type = STATS_VALUE_TYPE_U64;
-				stats[offset].flags = PPM_SCAP_STATS_LIBBPF_STATS;
-				strlcpy(stats[offset].name, info.name, STATS_NAME_MAX);
-				size_t dest_len = strlen(stats[offset].name);
+				stats[offset].type = METRIC_VALUE_TYPE_U64;
+				stats[offset].flags = METRICS_V2_LIBBPF_STATS;
+				/* The possibility to specify a name for a BPF program was introduced in kernel 4.15
+				 * https://github.com/torvalds/linux/commit/cb4d2b3f03d8eed90be3a194e5b54b734ec4bbe9
+				 * So it's possible that in some of our supported kernels `info.name` will be "".
+				 */
+				if(strlen(info.name) == 0)
+				{
+					/* Fallback on the elf section name */
+					strlcpy(stats[offset].name, handle->m_attached_progs[bpf_prog].name, METRIC_NAME_MAX);
+				}
+				else
+				{
+					strlcpy(stats[offset].name, info.name, METRIC_NAME_MAX);
+				}
 				switch(stat)
 				{
 				case RUN_CNT:
-					strncat(stats[offset].name, bpf_libbpf_stats_names[RUN_CNT], sizeof(stats[offset].name) - dest_len);
+					strlcat(stats[offset].name, bpf_libbpf_stats_names[RUN_CNT], sizeof(stats[offset].name));
 					stats[offset].value.u64 = info.run_cnt;
+					stats[offset].unit = METRIC_VALUE_UNIT_COUNT;
+					stats[offset].metric_type = METRIC_VALUE_METRIC_TYPE_MONOTONIC;
 					break;
 				case RUN_TIME_NS:
-					strncat(stats[offset].name, bpf_libbpf_stats_names[RUN_TIME_NS], sizeof(stats[offset].name) - dest_len);
+					strlcat(stats[offset].name, bpf_libbpf_stats_names[RUN_TIME_NS], sizeof(stats[offset].name));
 					stats[offset].value.u64 = info.run_time_ns;
+					stats[offset].unit = METRIC_VALUE_UNIT_TIME_NS_COUNT;
+					stats[offset].metric_type = METRIC_VALUE_METRIC_TYPE_MONOTONIC;
 					break;
 				case AVG_TIME_NS:
+					strlcat(stats[offset].name, bpf_libbpf_stats_names[AVG_TIME_NS], sizeof(stats[offset].name));
+					stats[offset].value.u64 = 0;
+					stats[offset].unit = METRIC_VALUE_UNIT_TIME_NS;
+					stats[offset].metric_type = METRIC_VALUE_METRIC_TYPE_NON_MONOTONIC_CURRENT;
 					if (info.run_cnt > 0)
 					{
-						strncat(stats[offset].name, bpf_libbpf_stats_names[AVG_TIME_NS], sizeof(stats[offset].name) - dest_len);
 						stats[offset].value.u64 = info.run_time_ns / info.run_cnt;
 					}
 					break;
 				default:
+					ASSERT(false);
 					break;
 				}
 				offset++;
@@ -1807,9 +1879,9 @@ int32_t scap_bpf_get_n_tracepoint_hit(struct scap_engine_handle engine, long* re
 	return SCAP_SUCCESS;
 }
 
-static int32_t next(struct scap_engine_handle engine, OUT scap_evt** pevent, OUT uint16_t* pcpuid)
+static int32_t next(struct scap_engine_handle engine, OUT scap_evt **pevent, OUT uint16_t *pdevid, OUT uint32_t *pflags)
 {
-	return ringbuffer_next(&engine.m_handle->m_dev_set, pevent, pcpuid);
+	return ringbuffer_next(&engine.m_handle->m_dev_set, pevent, pdevid, pflags);
 }
 
 static int32_t unsupported_config(struct scap_engine_handle engine, const char* msg)
@@ -1868,12 +1940,6 @@ static int32_t configure(struct scap_engine_handle engine, enum scap_setting set
 		{
 			return scap_bpf_start_dropping_mode(engine, arg1);
 		}
-	case SCAP_TRACERS_CAPTURE:
-		if(arg1 == 0)
-		{
-			return unsupported_config(engine, "Tracers cannot be disabled once enabled");
-		}
-		return scap_bpf_enable_tracers_capture(engine);
 	case SCAP_SNAPLEN:
 		return scap_bpf_set_snaplen(engine, arg1);
 	case SCAP_PPM_SC_MASK:
@@ -1921,7 +1987,7 @@ static int32_t init(scap_t* handle, scap_open_args *oargs)
 	ssize_t num_cpus = sysconf(_SC_NPROCESSORS_CONF);
 	if(num_cpus == -1)
 	{
-		return scap_errprintf(engine.m_handle->m_lasterr, errno, "_SC_NPROCESSORS_CONF");
+		return scap_errprintf(engine.m_handle->m_lasterr, errno, "cannot obtain the number of available CPUs from '_SC_NPROCESSORS_CONF'");
 	}
 
 	engine.m_handle->m_ncpus = num_cpus;
@@ -1929,7 +1995,7 @@ static int32_t init(scap_t* handle, scap_open_args *oargs)
 	ssize_t num_devs = sysconf(_SC_NPROCESSORS_ONLN);
 	if(num_devs == -1)
 	{
-		return scap_errprintf(engine.m_handle->m_lasterr, errno, "_SC_NPROCESSORS_ONLN");
+		return scap_errprintf(engine.m_handle->m_lasterr, errno, "cannot obtain the number of online CPUs from '_SC_NPROCESSORS_ONLN'");
 	}
 
 	rc = devset_init(&engine.m_handle->m_dev_set, num_devs, engine.m_handle->m_lasterr);
@@ -1952,23 +2018,21 @@ static int32_t init(scap_t* handle, scap_open_args *oargs)
 		return rc;
 	}
 
-	/* Here we are covering the case in which some syscalls don't have an associated ppm_sc
-	 * and so we cannot set them as (un)interesting. For this reason, we default them to 0.
-	 * Please note this is an extra check since our ppm_sc should already cover all possible syscalls.
-	 */
-	for(int i = 0; i < SYSCALL_TABLE_SIZE; i++)
-	{
-		rc = set_single_syscall_of_interest(engine.m_handle, i, false);
-		if(rc != SCAP_SUCCESS)
-		{
-			return rc;
-		}
-	}	
-
 	/* Store interesting sc codes */
 	memcpy(&engine.m_handle->curr_sc_set, &oargs->ppm_sc_of_interest, sizeof(interesting_ppm_sc_set));
 
+	engine.m_handle->m_flags = 0;
+	if(scap_get_bpf_stats_enabled())
+	{
+		engine.m_handle->m_flags |= ENGINE_FLAG_BPF_STATS_ENABLED;
+	}
+
 	return SCAP_SUCCESS;
+}
+
+static uint64_t get_flags(struct scap_engine_handle engine)
+{
+	return engine.m_handle->m_flags;
 }
 
 static uint32_t get_n_devs(struct scap_engine_handle engine)
@@ -2003,11 +2067,11 @@ uint64_t scap_bpf_get_schema_version(struct scap_engine_handle engine)
 
 const struct scap_vtable scap_bpf_engine = {
 	.name = BPF_ENGINE,
-	.mode = SCAP_MODE_LIVE,
 	.savefile_ops = NULL,
 
 	.alloc_handle = alloc_handle,
 	.init = init,
+	.get_flags = get_flags,
 	.free_handle = free_handle,
 	.close = scap_bpf_close,
 	.next = next,
@@ -2019,10 +2083,6 @@ const struct scap_vtable scap_bpf_engine = {
 	.get_n_tracepoint_hit = scap_bpf_get_n_tracepoint_hit,
 	.get_n_devs = get_n_devs,
 	.get_max_buf_used = get_max_buf_used,
-	.get_threadlist = scap_procfs_get_threadlist,
-	.get_vpid = noop_get_vxid,
-	.get_vtid = noop_get_vxid,
-	.getpid_global = scap_os_getpid_global,
 	.get_api_version = scap_bpf_get_api_version,
 	.get_schema_version = scap_bpf_get_schema_version,
 };

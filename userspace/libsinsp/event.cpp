@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,7 +16,7 @@ limitations under the License.
 
 */
 
-#include "sinsp_errno.h"
+#include <libsinsp/sinsp_errno.h>
 
 #ifndef _WIN32
 #include <inttypes.h>
@@ -28,12 +29,16 @@ limitations under the License.
 #endif
 
 #include <limits>
+#include <string>
+#include <optional>
+#include <functional>
+#include <filesystem>
 
-#include "sinsp.h"
-#include "sinsp_int.h"
-#include "strlcpy.h"
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
+#include <libscap/strl.h>
 
-#include "scap.h"
+#include <libscap/scap.h>
 
 extern sinsp_evttables g_infotables;
 
@@ -66,7 +71,6 @@ extern sinsp_evttables g_infotables;
 sinsp_evt::sinsp_evt() :
 		m_inspector(NULL),
 		m_pevt(NULL),
-		m_poriginal_evt(NULL),
 		m_pevt_storage(NULL),
 		m_cpuid(0),
 		m_evtnum(0),
@@ -90,7 +94,6 @@ sinsp_evt::sinsp_evt() :
 sinsp_evt::sinsp_evt(sinsp *inspector) :
 		m_inspector(inspector),
 		m_pevt(NULL),
-		m_poriginal_evt(NULL),
 		m_pevt_storage(NULL),
 		m_cpuid(0),
 		m_evtnum(0),
@@ -108,7 +111,6 @@ sinsp_evt::sinsp_evt(sinsp *inspector) :
 		m_filtered_out(false),
 		m_event_info_table(g_infotables.m_event_info)
 {
-	
 }
 
 sinsp_evt::~sinsp_evt()
@@ -117,11 +119,6 @@ sinsp_evt::~sinsp_evt()
 	{
 		delete[] m_pevt_storage;
 	}
-}
-
-uint32_t sinsp_evt::get_dump_flags()
-{
-	return scap_event_get_dump_flags(m_inspector->m_h);
 }
 
 const char *sinsp_evt::get_name() const
@@ -134,7 +131,7 @@ event_direction sinsp_evt::get_direction() const
 	return (event_direction)(m_pevt->type & PPME_DIRECTION_FLAG);
 }
 
-int64_t sinsp_evt::get_tid()
+int64_t sinsp_evt::get_tid() const
 {
 	return m_pevt->tid;
 }
@@ -144,7 +141,7 @@ void sinsp_evt::set_iosize(uint32_t size)
 	m_iosize = size;
 }
 
-uint32_t sinsp_evt::get_iosize()
+uint32_t sinsp_evt::get_iosize() const
 {
 	return m_iosize;
 }
@@ -165,7 +162,7 @@ sinsp_threadinfo* sinsp_evt::get_thread_info(bool query_os_if_not_found)
 	return m_inspector->get_thread_ref(m_pevt->tid, query_os_if_not_found, false).get();
 }
 
-int64_t sinsp_evt::get_fd_num()
+int64_t sinsp_evt::get_fd_num() const
 {
 	if(m_fdinfo)
 	{
@@ -189,7 +186,7 @@ uint32_t sinsp_evt::get_num_params()
 	return (uint32_t)m_params.size();
 }
 
-sinsp_evt_param *sinsp_evt::get_param(uint32_t id)
+const sinsp_evt_param *sinsp_evt::get_param(uint32_t id)
 {
 	if((m_flags & sinsp_evt::SINSP_EF_PARAMS_LOADED) == 0)
 	{
@@ -198,6 +195,33 @@ sinsp_evt_param *sinsp_evt::get_param(uint32_t id)
 	}
 
 	return &(m_params.at(id));
+}
+
+const sinsp_evt_param* sinsp_evt::get_param_by_name(const char* name)
+{
+	//
+	// Make sure the params are actually loaded
+	//
+	if((m_flags & sinsp_evt::SINSP_EF_PARAMS_LOADED) == 0)
+	{
+		load_params();
+		m_flags |= (uint32_t)sinsp_evt::SINSP_EF_PARAMS_LOADED;
+	}
+
+	//
+	// Locate the parameter given the name
+	//
+	uint32_t np = get_num_params();
+
+	for(uint32_t j = 0; j < np; j++)
+	{
+		if(strcmp(name, get_param_name(j)) == 0)
+		{
+			return &(m_params[j]);
+		}
+	}
+
+	return NULL;
 }
 
 const char *sinsp_evt::get_param_name(uint32_t id)
@@ -213,7 +237,7 @@ const char *sinsp_evt::get_param_name(uint32_t id)
 	return m_info->params[id].name;
 }
 
-const struct ppm_param_info* sinsp_evt::get_param_info(uint32_t id)
+const ppm_param_info* sinsp_evt::get_param_info(uint32_t id)
 {
 	if((m_flags & sinsp_evt::SINSP_EF_PARAMS_LOADED) == 0)
 	{
@@ -226,7 +250,7 @@ const struct ppm_param_info* sinsp_evt::get_param_info(uint32_t id)
 	return &(m_info->params[id]);
 }
 
-uint32_t binary_buffer_to_hex_string(char *dst, char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
+static uint32_t binary_buffer_to_hex_string(char *dst, const char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
 {
 	uint32_t j;
 	uint32_t k;
@@ -234,7 +258,7 @@ uint32_t binary_buffer_to_hex_string(char *dst, char *src, uint32_t dstlen, uint
 	uint32_t num_chunks;
 	uint32_t row_len;
 	char row[128];
-	char *ptr;
+	const char *ptr;
 	bool truncated = false;
 
 	for(j = 0; j < srclen; j += 8 * sizeof(uint16_t))
@@ -257,7 +281,7 @@ uint32_t binary_buffer_to_hex_string(char *dst, char *src, uint32_t dstlen, uint
 			{
 				ret = snprintf(row + k, sizeof(row) - k, " %.4x", chunk);
 			}
-			if (ret < 0 || ret >= sizeof(row) - k)
+			if (ret < 0 || (unsigned int)ret >= sizeof(row) - k)
 			{
 				dst[0] = 0;
 				return 0;
@@ -320,7 +344,7 @@ uint32_t binary_buffer_to_hex_string(char *dst, char *src, uint32_t dstlen, uint
 	}
 }
 
-uint32_t binary_buffer_to_asciionly_string(char *dst, char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
+static uint32_t binary_buffer_to_asciionly_string(char *dst, const char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
 {
 	uint32_t j;
 	uint32_t k = 0;
@@ -377,7 +401,7 @@ uint32_t binary_buffer_to_asciionly_string(char *dst, char *src, uint32_t dstlen
 	return k;
 }
 
-uint32_t binary_buffer_to_string_dots(char *dst, char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
+static uint32_t binary_buffer_to_string_dots(char *dst, const char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
 {
 	uint32_t j;
 	uint32_t k = 0;
@@ -420,7 +444,7 @@ uint32_t binary_buffer_to_string_dots(char *dst, char *src, uint32_t dstlen, uin
 	return k;
 }
 
-uint32_t binary_buffer_to_base64_string(char *dst, char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
+static uint32_t binary_buffer_to_base64_string(char *dst, const char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
 {
 	//
 	// base64 encoder, malloc-free version of:
@@ -467,7 +491,7 @@ uint32_t binary_buffer_to_base64_string(char *dst, char *src, uint32_t dstlen, u
 	return enc_dstlen;
 }
 
-uint32_t binary_buffer_to_json_string(char *dst, char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
+static uint32_t binary_buffer_to_json_string(char *dst, const char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
 {
 	uint32_t k = 0;
 	switch(fmt)
@@ -488,7 +512,7 @@ uint32_t binary_buffer_to_json_string(char *dst, char *src, uint32_t dstlen, uin
 	return k;
 }
 
-uint32_t binary_buffer_to_string(char *dst, char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
+static uint32_t binary_buffer_to_string(char *dst, const char *src, uint32_t dstlen, uint32_t srclen, sinsp_evt::param_fmt fmt)
 {
 	uint32_t k = 0;
 
@@ -531,7 +555,7 @@ uint32_t binary_buffer_to_string(char *dst, char *src, uint32_t dstlen, uint32_t
 	return k;
 }
 
-uint32_t strcpy_sanitized(char *dest, char *src, uint32_t dstsize)
+static uint32_t strcpy_sanitized(char *dest, const char *src, uint32_t dstsize)
 {
 	volatile char* tmp = (volatile char *)dest;
 	uint32_t j = 0;
@@ -576,7 +600,7 @@ int sinsp_evt::render_fd_json(Json::Value *ret, int64_t fd, const char** resolve
 
 	if(fd >= 0)
 	{
-		sinsp_fdinfo_t *fdinfo = tinfo->get_fd(fd);
+		sinsp_fdinfo *fdinfo = tinfo->get_fd(fd);
 		if(fdinfo)
 		{
 			char tch = fdinfo->get_typechar();
@@ -669,7 +693,7 @@ char* sinsp_evt::render_fd(int64_t fd, const char** resolved_str, sinsp_evt::par
 
 	if(fd >= 0)
 	{
-		sinsp_fdinfo_t *fdinfo = tinfo->get_fd(fd);
+		sinsp_fdinfo *fdinfo = tinfo->get_fd(fd);
 		if(fdinfo)
 		{
 			char tch = fdinfo->get_typechar();
@@ -726,21 +750,6 @@ char* sinsp_evt::render_fd(int64_t fd, const char** resolved_str, sinsp_evt::par
 			snprintf(&m_resolved_paramstr_storage[0],
 				m_resolved_paramstr_storage.size(),
 				"<%s>%s", typestr, sanitized_str.c_str());
-
-/* XXX
-			if(sanitized_str.length() == 0)
-			{
-				snprintf(&m_resolved_paramstr_storage[0],
-							m_resolved_paramstr_storage.size(),
-							"<%c>", tch);
-			}
-			else
-			{
-				snprintf(&m_resolved_paramstr_storage[0],
-							m_resolved_paramstr_storage.size(),
-							"%s", sanitized_str.c_str());
-			}
-*/
 		}
 	}
 	else if(fd == PPM_AT_FDCWD)
@@ -767,702 +776,6 @@ char* sinsp_evt::render_fd(int64_t fd, const char** resolved_str, sinsp_evt::par
 	}
 
 	return &m_paramstr_storage[0];
-}
-
-Json::Value sinsp_evt::get_param_as_json(uint32_t id, OUT const char** resolved_str, sinsp_evt::param_fmt fmt)
-{
-	const ppm_param_info* param_info = NULL;
-	char* payload = NULL;
-	uint32_t payload_len = 0;
-	Json::Value ret = Json::nullValue;
-
-	//
-	// Make sure the params are actually loaded
-	//
-	if((m_flags & sinsp_evt::SINSP_EF_PARAMS_LOADED) == 0)
-	{
-		load_params();
-		m_flags |= (uint32_t)sinsp_evt::SINSP_EF_PARAMS_LOADED;
-	}
-
-	//
-	// Reset the resolved string
-	//
-	m_resolved_paramstr_storage[0] = 0;
-
-	//
-	// Get the parameter
-	//
-	sinsp_evt_param *param = get_param(id);
-	payload = param->m_val;
-	payload_len = param->m_len;
-	param_info = &(m_info->params[id]);
-
-	/* We have an empty parameter. */
-	if(payload_len == 0)
-	{
-		*resolved_str = &m_resolved_paramstr_storage[0];
-		return ret;
-	}
-
-	//
-	// Get the parameter information
-	//
-	if(param_info->type == PT_DYN && param_info->info != NULL)
-	{
-		uint8_t dyn_idx = *(uint8_t*)payload;
-
-		if(dyn_idx < param_info->ninfo) {
-			const struct ppm_param_info* dyn_params =
-				(const struct ppm_param_info*)param_info->info;
-
-			payload += sizeof(uint8_t);
-			payload_len -= sizeof(uint8_t);
-
-			param_info = &dyn_params[dyn_idx];
-		}
-	}
-
-	switch(param_info->type)
-	{
-	case PT_INT8:
-		ASSERT(payload_len == sizeof(int8_t));
-		ret = *(int8_t *)payload;
-		break;
-
-	case PT_INT16:
-		ASSERT(payload_len == sizeof(int16_t));
-		ret = *(int16_t *)payload;
-		break;
-
-	case PT_INT32:
-		ASSERT(payload_len == sizeof(int32_t));
-		ret = *(int32_t *)payload;
-		break;
-
-	case PT_INT64:
-		ASSERT(payload_len == sizeof(int64_t));
-		ret = (Json::Value::Int64)*(int64_t *)payload;
-		break;
-
-	case PT_UINT8:
-		ASSERT(payload_len == sizeof(uint8_t));
-		ret = *(uint8_t *)payload;
-		break;
-
-	case PT_UINT16:
-		ASSERT(payload_len == sizeof(uint16_t));
-		ret = *(uint16_t *)payload;
-		break;
-
-	case PT_UINT32:
-		ASSERT(payload_len == sizeof(uint32_t));
-		ret = *(uint32_t *)payload;
-		break;
-
-	case PT_UINT64:
-		ASSERT(payload_len == sizeof(uint64_t));
-		ret = (Json::Value::UInt64)*(int64_t *)payload;
-		break;
-
-	case PT_PID:
-		{
-			ASSERT(payload_len == sizeof(int64_t));
-			ret = (Json::Value::UInt64)*(int64_t *)payload;
-
-			sinsp_threadinfo* atinfo = m_inspector->get_thread_ref(*(int64_t *)payload, false, true).get();
-			if(atinfo != NULL)
-			{
-				std::string& tcomm = atinfo->m_comm;
-
-				//
-				// Make sure the string will fit
-				//
-				if(tcomm.size() >= m_resolved_paramstr_storage.size())
-				{
-					m_resolved_paramstr_storage.resize(tcomm.size() + 1);
-				}
-
-				snprintf(&m_resolved_paramstr_storage[0],
-						 m_resolved_paramstr_storage.size(),
-						 "%s",
-						 tcomm.c_str());
-			}
-		}
-		break;
-
-	case PT_ERRNO:
-	{
-		ASSERT(payload_len == sizeof(int64_t));
-
-		int64_t val = *(int64_t *)payload;
-
-		//
-		// Resolve this as an errno
-		//
-		std::string errstr;
-
-		if(val < 0)
-		{
-			errstr = sinsp_utils::errno_to_str((int32_t)val);
-
-			if(errstr != "")
-			{
-				snprintf(&m_resolved_paramstr_storage[0],
-				         m_resolved_paramstr_storage.size(),
-				         "%s", errstr.c_str());
-			}
-		}
-		ret = (Json::Value::Int64)val;
-	}
-	break;
-
-	case PT_FD:
-		{
-			// We use the string extractor to get
-			// the resolved path, but use our routine
-			// to get the actual value to return
-			ASSERT(payload_len == sizeof(int64_t));
-			int64_t fd = *(int64_t*)payload;
-			render_fd_json(&ret, fd, resolved_str, fmt);
-			ret["num"] = (Json::Value::UInt64)*(int64_t *)payload;
-			break;
-		}
-
-	case PT_CHARBUF:
-	case PT_FSPATH:
-	case PT_FSRELPATH:
-	case PT_BYTEBUF:
-		ret = get_param_as_str(id, resolved_str, fmt);
-		break;
-
-	case PT_SOCKADDR:
-		if(payload[0] == AF_UNIX)
-		{
-			ASSERT(payload_len > 1);
-
-			//
-			// Sanitize the file string.
-			//
-			std::string sanitized_str = payload + 1;
-			sanitize_string(sanitized_str);
-
-			ret = sanitized_str;
-		}
-		else if(payload[0] == PPM_AF_INET)
-		{
-			if(payload_len == 1 + 4 + 2)
-			{
-				const int ipv4_len = (3 + 1) * 4 + 1;
-				char ipv4_addr[ ipv4_len ];
-
-				snprintf(
-					ipv4_addr,
-					ipv4_len,
-						"%u.%u.%u.%u",
-						(unsigned int)(uint8_t)payload[1],
-						(unsigned int)(uint8_t)payload[2],
-						(unsigned int)(uint8_t)payload[3],
-						(unsigned int)(uint8_t)payload[4]
-				);
-				ret["addr"] = std::string(ipv4_addr);
-				ret["port"] = *(uint16_t*)(payload + 5);
-			}
-			else
-			{
-				ASSERT(false);
-				ret = "INVALID IPv4";
-			}
-		}
-		else
-		{
-			ret["family"] = (int)payload[0];
-		}
-		break;
-
-	case PT_SOCKTUPLE:
-		if(payload[0] == PPM_AF_INET)
-		{
-			if(payload_len == 1 + 4 + 2 + 4 + 2)
-			{
-				Json::Value source;
-				Json::Value dest;
-
-				const int ipv4_len = (3 + 1) * 4 + 1;
-				char ipv4_addr[ ipv4_len ];
-
-				snprintf(
-					ipv4_addr,
-					ipv4_len,
-						"%u.%u.%u.%u",
-						(unsigned int)(uint8_t)payload[1],
-						(unsigned int)(uint8_t)payload[2],
-						(unsigned int)(uint8_t)payload[3],
-						(unsigned int)(uint8_t)payload[4]
-				);
-
-				source["addr"] = std::string(ipv4_addr);
-				source["port"] = *(uint16_t*)(payload + 5);
-
-				snprintf(
-					ipv4_addr,
-					ipv4_len,
-				         "%u.%u.%u.%u",
-				         (unsigned int)(uint8_t)payload[7],
-				         (unsigned int)(uint8_t)payload[8],
-				         (unsigned int)(uint8_t)payload[9],
-				         (unsigned int)(uint8_t)payload[10]
-				);
-
-
-				dest["addr"] = std::string(ipv4_addr);
-				dest["port"] = *(uint16_t*)(payload + 11);
-
-				ret["src"] = source;
-				ret["dst"] = dest;
-			}
-			else
-			{
-				ASSERT(false);
-				ret = "INVALID IPv4";
-			}
-		}
-		else if(payload[0] == PPM_AF_INET6)
-		{
-			if(payload_len == 1 + 16 + 2 + 16 + 2)
-			{
-				uint8_t* sip6 = (uint8_t*)payload + 1;
-				uint8_t* dip6 = (uint8_t*)payload + 19;
-				uint8_t* sip = (uint8_t*)payload + 13;
-				uint8_t* dip = (uint8_t*)payload + 31;
-
-				if(sinsp_utils::is_ipv4_mapped_ipv6(sip6) && sinsp_utils::is_ipv4_mapped_ipv6(dip6))
-				{
-					Json::Value source;
-					Json::Value dest;
-
-					const int ipv4_len = (3 + 1) * 4 + 1;
-					char ipv4_addr[ ipv4_len ];
-
-					snprintf(
-						ipv4_addr,
-						ipv4_len,
-							"%u.%u.%u.%u",
-							(unsigned int)sip[0],
-							(unsigned int)sip[1],
-							(unsigned int)sip[2],
-							(unsigned int)sip[3]
-					);
-
-					source["addr"] = std::string(ipv4_addr);
-					source["port"] = (unsigned int)*(uint16_t*)(payload + 17);
-
-					snprintf(
-						ipv4_addr,
-						ipv4_len,
-							"%u.%u.%u.%u",
-							(unsigned int)dip[0],
-							(unsigned int)dip[1],
-							(unsigned int)dip[2],
-							(unsigned int)dip[3]
-				 	);
-
-					dest["addr"] = std::string(ipv4_addr);
-					dest["port"] = (unsigned int)*(uint16_t*)(payload + 35);
-
-					ret["src"] = source;
-					ret["dst"] = dest;
-
-					break;
-				}
-				else
-				{
-					char srcstr[INET6_ADDRSTRLEN];
-					char dststr[INET6_ADDRSTRLEN];
-
-					if(inet_ntop(AF_INET6, sip6, srcstr, sizeof(srcstr)) &&
-						inet_ntop(AF_INET6, dip6, dststr, sizeof(dststr)))
-					{
-						Json::Value source;
-						Json::Value dest;
-
-						source["addr"] = srcstr;
-						source["port"] = (unsigned int)*(uint16_t*)(payload + 17);
-
-						dest["addr"] = dststr;
-						dest["port"] = (unsigned int)*(uint16_t*)(payload + 35);
-
-						ret["src"] = source;
-						ret["dst"] = dest;
-
-						break;
-					}
-				}
-			}
-			ASSERT(false);
-			ret = "INVALID IPv6";
-
-		}
-		else if(payload[0] == AF_UNIX)
-		{
-			ASSERT(payload_len > 17);
-
-			//
-			// Sanitize the file string.
-			//
-            std::string sanitized_str = payload + 17;
-	    sanitize_string(sanitized_str);
-
-			snprintf(&m_paramstr_storage[0],
-				m_paramstr_storage.size(),
-				"%" PRIx64 "->%" PRIx64 " %s",
-				*(uint64_t*)(payload + 1),
-				*(uint64_t*)(payload + 9),
-				sanitized_str.c_str());
-		}
-		else
-		{
-			ret["family"] = (int)payload[0];
-		}
-		break;
-	case PT_FDLIST:
-		ret = get_param_as_str(id, resolved_str, fmt);
-		break;
-
-	case PT_SYSCALLID:
-		{
-			uint16_t ppm_sc = *(uint16_t *)payload;
-			if(ppm_sc >= PPM_SC_MAX)
-			{
-				ASSERT(false);
-				snprintf(&m_resolved_paramstr_storage[0],
-						 m_resolved_paramstr_storage.size(),
-						 "<unknown syscall>");
-				break;
-			}
-			ret = ppm_sc;
-			snprintf(&m_resolved_paramstr_storage[0],
-				m_resolved_paramstr_storage.size(),
-				"%s",
-				scap_get_ppm_sc_name((ppm_sc_code)ppm_sc));
-		}
-		break;
-	case PT_SIGTYPE:
-		{
-			const char* sigstr;
-
-			ASSERT(payload_len == sizeof(uint8_t));
-			uint8_t val = *(uint8_t *)payload;
-
-			sigstr = sinsp_utils::signal_to_str(val);
-			ret = val;
-
-			if(sigstr)
-			{
-				snprintf(&m_resolved_paramstr_storage[0],
-							m_resolved_paramstr_storage.size(),
-							"%s", sigstr);
-			}
-		}
-		break;
-	case PT_RELTIME:
-		{
-			ASSERT(payload_len == sizeof(uint64_t));
-			uint64_t val = *(uint64_t *)payload;
-			ret = (Json::Value::Int64)val;
-
-			snprintf(&m_resolved_paramstr_storage[0],
-						m_resolved_paramstr_storage.size(),
-						"%lgs",
-						((double)val) / 1000000000);
-		}
-		break;
-	case PT_FLAGS8:
-	case PT_FLAGS16:
-	case PT_FLAGS32:
-	case PT_ENUMFLAGS8:
-	case PT_ENUMFLAGS16:
-	case PT_ENUMFLAGS32:
-		{
-			uint32_t val = 0;
-			switch(param_info->type)
-			{
-			case PT_FLAGS8:
-			case PT_ENUMFLAGS8:
-				val = *(uint8_t *)payload;
-				break;
-			case PT_FLAGS16:
-			case PT_ENUMFLAGS16:
-				val = *(uint16_t *)payload;
-				break;
-			case PT_FLAGS32:
-			case PT_ENUMFLAGS32:
-				val = *(uint32_t *)payload;
-				break;
-			default:
-				ASSERT(false);
-			}
-			ret["val"] = val;
-			ret["flags"] = Json::arrayValue;
-
-			const bool exact_match = param_info->type == PT_ENUMFLAGS8 || param_info->type == PT_ENUMFLAGS16 || param_info->type == PT_ENUMFLAGS32;
-
-			const struct ppm_name_value *flags = (const struct ppm_name_value *)m_info->params[id].info;
-			uint32_t initial_val = val;
-
-			while(flags != NULL && flags->name != NULL)
-			{
-				bool match = false;
-				if (exact_match)
-				{
-					match = flags->value == initial_val;
-				}
-				else
-				{
-					// If flag is 0, then initial_val needs to be 0 for the flag to be resolved
-					if ((flags->value == 0 && initial_val == 0) ||
-					   (flags->value != 0 && (val & flags->value) == flags->value && val != 0))
-					{
-						match = true;
-						// We remove current flags value to avoid duplicate flags e.g. PPM_O_RDWR, PPM_O_RDONLY, PPM_O_WRONLY
-						val &= ~flags->value;
-					}
-				}
-				if (match)
-				{
-					ret["flags"].append(flags->name);
-					if (!exact_match && flags->value == initial_val)
-					{
-						// if we reached initial val, we have finished.
-						// NOTE: for enum flags, we might have multiple flags matching same enum value
-						// see socket_families (eg: AF_LOCAL, AF_UNIX). Don't break.
-						break;
-					}
-				}
-				flags++;
-			}
-			break;
-		}
-	case PT_MODE:
-		{
-			uint32_t val = *(uint32_t *)payload & (((uint64_t)1 << payload_len * 8) - 1);
-			ret["val"] = val;
-			ret["mode"] = Json::arrayValue;
-
-			const struct ppm_name_value *mode = (const struct ppm_name_value *)m_info->params[id].info;
-			uint32_t initial_val = val;
-
-			while(mode != NULL && mode->name != NULL && mode->value != initial_val)
-			{
-				// If mode is 0, then initial_val needs to be 0 for the mode to be resolved
-				if((mode->value == 0 && initial_val == 0) ||
-				   (mode->value != 0 && (val & mode->value) == mode->value && val != 0))
-				{
-					ret["mode"].append(mode->name);
-
-					// We remove current mode value to avoid duplicates
-					val &= ~mode->value;
-				}
-
-				mode++;
-			}
-
-			if(mode != NULL && mode->name != NULL)
-			{
-				ret["mode"].append(mode->name);
-			}
-
-			break;
-		}
-	case PT_UID:
-	case PT_GID:
-	{
-		ASSERT(payload_len == sizeof(uint32_t));
-		uint32_t val = *(uint32_t *)payload;
-		if(val < std::numeric_limits<uint32_t>::max() )
-		{
-			ret = val;
-		}
-		else
-		{
-			ret = -1;
-		}
-		break;
-	}
-	case PT_CHARBUFARRAY:
-	{
-		ASSERT(param->m_len == sizeof(uint64_t));
-		std::vector<char*>* strvect = (std::vector<char*>*)*(uint64_t *)param->m_val;
-
-		m_paramstr_storage[0] = 0;
-
-		while(true)
-		{
-			std::vector<char*>::iterator it;
-			std::vector<char*>::iterator itbeg;
-			bool need_to_resize = false;
-
-			//
-			// Copy the arguments
-			//
-			char* dst = &m_paramstr_storage[0];
-			char* dstend = &m_paramstr_storage[0] + m_paramstr_storage.size() - 2;
-
-			for(it = itbeg = strvect->begin(); it != strvect->end(); ++it)
-			{
-				char* src = *it;
-
-				if(it != itbeg)
-				{
-					if(dst < dstend - 1)
-					{
-						*dst++ = ',';
-					}
-				}
-
-				while(*src != 0 && dst < dstend)
-				{
-					*dst++ = *src++;
-				}
-
-				if(dst == dstend)
-				{
-					//
-					// Reached the end of m_paramstr_storage, we need to resize it
-					//
-					need_to_resize = true;
-					break;
-				}
-			}
-
-			if(need_to_resize)
-			{
-				m_paramstr_storage.resize(m_paramstr_storage.size() * 2);
-				continue;
-			}
-
-			*dst = 0;
-
-			break;
-		}
-	}
-	break;
-	case PT_CHARBUF_PAIR_ARRAY:
-	{
-		ASSERT(param->m_len == sizeof(uint64_t));
-		std::pair<std::vector<char*>*, std::vector<char*>*>* pairs =
-			(std::pair<std::vector<char*>*, std::vector<char*>*>*)*(uint64_t *)param->m_val;
-		ASSERT(pairs->first->size() == pairs->second->size());
-
-		m_paramstr_storage[0] = 0;
-
-		while(true)
-		{
-			std::vector<char*>::iterator it1;
-			std::vector<char*>::iterator itbeg1;
-			std::vector<char*>::iterator it2;
-			std::vector<char*>::iterator itbeg2;
-			bool need_to_resize = false;
-
-			//
-			// Copy the arguments
-			//
-			char* dst = &m_paramstr_storage[0];
-			char* dstend = &m_paramstr_storage[0] + m_paramstr_storage.size() - 2;
-
-			for(it1 = itbeg1 = pairs->first->begin(), it2 = itbeg2 = pairs->second->begin();
-			it1 != pairs->first->end();
-				++it1, ++it2)
-			{
-				char* src = *it1;
-
-				if(it1 != itbeg1)
-				{
-					if(dst < dstend - 1)
-					{
-						*dst++ = ',';
-					}
-				}
-
-				//
-				// Copy the first string
-				//
-				while(*src != 0 && dst < dstend)
-				{
-					*dst++ = *src++;
-				}
-
-				if(dst < dstend - 1)
-				{
-					*dst++ = ':';
-				}
-
-				//
-				// Copy the second string
-				//
-				src = *it2;
-				while(*src != 0 && dst < dstend)
-				{
-					*dst++ = *src++;
-				}
-
-				if(dst == dstend)
-				{
-					//
-					// Reached the end of m_paramstr_storage, we need to resize it
-					//
-					need_to_resize = true;
-					break;
-				}
-			}
-
-			if(need_to_resize)
-			{
-				m_paramstr_storage.resize(m_paramstr_storage.size() * 2);
-				continue;
-			}
-
-			*dst = 0;
-
-			break;
-		}
-	}
-	case PT_ABSTIME:
-		{
-			ASSERT(payload_len == sizeof(uint64_t));
-			uint64_t val = *(uint64_t *)payload;
-			time_t sec = val / 1000000000ULL;
-			unsigned long nsec = val % 1000000000ULL;
-			struct tm tm;
-			localtime_r(&sec, &tm);
-			strftime(&m_paramstr_storage[0],
-				m_paramstr_storage.size(),
-				"%Y-%m-%d %H:%M:%S.XXXXXXXXX %z", &tm);
-			snprintf(&m_paramstr_storage[20], 9, "%09ld", nsec);
-			break;
-		}
-	case PT_DYN:
-		ASSERT(false);
-		snprintf(&m_paramstr_storage[0],
-		         m_paramstr_storage.size(),
-		         "INVALID DYNAMIC PARAMETER");
-		break;
-
-	case PT_SIGSET:
-		ret = get_param_as_str(id, resolved_str, fmt);
-		break;
-
-	default:
-		ASSERT(false);
-		snprintf(&m_paramstr_storage[0],
-		         m_paramstr_storage.size(),
-		         "(n.a.)");
-		break;
-	}
-
-	*resolved_str = &m_resolved_paramstr_storage[0];
-
-	return ret;
 }
 
 std::string sinsp_evt::get_base_dir(uint32_t id, sinsp_threadinfo *tinfo)
@@ -1493,8 +806,7 @@ std::string sinsp_evt::get_base_dir(uint32_t id, sinsp_threadinfo *tinfo)
 		return cwd;
 	}
 
-	const sinsp_evt_param* dir_param = get_param(dirfd_id);
-	const int64_t dirfd = *(int64_t*)dir_param->m_val;
+	const int64_t dirfd = get_param(dirfd_id)->as<int64_t>();
 
 	// If the FD is special value PPM_AT_FDCWD, just use CWD
 	if (dirfd == PPM_AT_FDCWD)
@@ -1518,9 +830,10 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 {
 	char* prfmt = NULL;
 	const ppm_param_info* param_info = NULL;
-	char* payload = NULL;
+	std::optional<sinsp_evt_param> dyn_param;
+	std::string_view s;
+	uint8_t sockfamily;
 	uint32_t j = 0;
-	uint32_t payload_len = 0;
 
 	//
 	// Make sure the params are actually loaded
@@ -1541,12 +854,10 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	//
 	// Get the parameter
 	//
-	sinsp_evt_param *param = get_param(id);
-	payload = param->m_val;
-	payload_len = param->m_len;
-	param_info = &(m_info->params[id]);
+	const sinsp_evt_param *param = get_param(id);
+	param_info = param->get_info();
 
-	if(payload_len == 0)
+	if(param->m_len == 0)
 	{
 		snprintf(&m_paramstr_storage[0], m_paramstr_storage.size(), "NULL");
 		*resolved_str = &m_resolved_paramstr_storage[0];
@@ -1558,15 +869,16 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	//
 	if(param_info->type == PT_DYN && param_info->info != NULL)
 	{
-		uint8_t dyn_idx = *(uint8_t*)payload;
+		uint8_t dyn_idx = 0;
+		memcpy(&dyn_idx, param->m_val, sizeof(uint8_t));
 
 		if(dyn_idx < param_info->ninfo) {
-			const struct ppm_param_info* dyn_params =
-				(const struct ppm_param_info*)param_info->info;
+			auto dyn_params = (const ppm_param_info*)param_info->info;
 
-			payload += sizeof(uint8_t);
-			payload_len -= sizeof(uint8_t);
+			dyn_param = sinsp_evt_param(param->m_evt, param->m_idx,
+				param->m_val + sizeof(uint8_t), param->m_len - sizeof(uint8_t));
 
+			param = std::addressof(*dyn_param);
 			param_info = &dyn_params[dyn_idx];
 		}
 	}
@@ -1576,54 +888,46 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	switch(param_info->type)
 	{
 	case PT_INT8:
-		ASSERT(payload_len == sizeof(int8_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo8, PRId8, PRIX8);
 
 		snprintf(&m_paramstr_storage[0],
 			m_paramstr_storage.size(),
-			prfmt, *(int8_t *)payload);
+			prfmt, param->as<int8_t>());
 		break;
 	case PT_INT16:
-		ASSERT(payload_len == sizeof(int16_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo16, PRId16, PRIX16);
 
 		snprintf(&m_paramstr_storage[0],
 			m_paramstr_storage.size(),
-			prfmt, *(int16_t *)payload);
+			prfmt, param->as<int16_t>());
 		break;
 	case PT_INT32:
-		ASSERT(payload_len == sizeof(int32_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo32, PRId32, PRIX32);
 
 		snprintf(&m_paramstr_storage[0],
 			m_paramstr_storage.size(),
-			prfmt, *(int32_t *)payload);
+			prfmt, param->as<int32_t>());
 		break;
 	case PT_INT64:
-		ASSERT(payload_len == sizeof(int64_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo64, PRId64, PRIX64);
 
 		snprintf(&m_paramstr_storage[0],
 			m_paramstr_storage.size(),
-			prfmt, *(int64_t *)payload);
+			prfmt, param->as<int64_t>());
 		break;
 	case PT_FD:
 		{
-			ASSERT(payload_len == sizeof(int64_t));
-			int64_t fd = *(int64_t*)payload;
+			int64_t fd = param->as<int64_t>();
 			render_fd(fd, resolved_str, fmt);
 			break;
 		}
 	case PT_PID:
 		{
-			ASSERT(payload_len == sizeof(int64_t));
-
 			snprintf(&m_paramstr_storage[0],
 					 m_paramstr_storage.size(),
-					 "%" PRId64, *(int64_t *)payload);
+					 "%" PRId64, param->as<int64_t>());
 
-
-			sinsp_threadinfo* atinfo = m_inspector->get_thread_ref(*(int64_t *)payload, false, true).get();
+			sinsp_threadinfo* atinfo = m_inspector->get_thread_ref(param->as<int64_t>(), false, true).get();
 			if(atinfo != NULL)
 			{
 				std::string& tcomm = atinfo->m_comm;
@@ -1644,34 +948,29 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		}
 		break;
 	case PT_UINT8:
-		ASSERT(payload_len == sizeof(uint8_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo8, PRId8, PRIX8);
 
 		snprintf(&m_paramstr_storage[0],
 		         m_paramstr_storage.size(),
-		         prfmt, *(uint8_t *)payload);
+		         prfmt, param->as<uint8_t>());
 		break;
 	case PT_UINT16:
-		ASSERT(payload_len == sizeof(uint16_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo16, PRId16, PRIX16);
 
 		snprintf(&m_paramstr_storage[0],
 		         m_paramstr_storage.size(),
-		         prfmt, *(uint16_t *)payload);
+		         prfmt, param->as<uint16_t>());
 		break;
 	case PT_UINT32:
-		ASSERT(payload_len == sizeof(uint32_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo32, PRId32, PRIX32);
 
 		snprintf(&m_paramstr_storage[0],
 		         m_paramstr_storage.size(),
-		         prfmt, *(uint32_t *)payload);
+		         prfmt, param->as<uint32_t>());
 		break;
 	case PT_ERRNO:
 	{
-		ASSERT(payload_len == sizeof(int64_t));
-
-		int64_t val = *(int64_t *)payload;
+		int64_t val = param->as<int64_t>();
 
 		snprintf(&m_paramstr_storage[0],
 		         m_paramstr_storage.size(),
@@ -1696,55 +995,56 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	}
 	break;
 	case PT_UINT64:
-		ASSERT(payload_len == sizeof(uint64_t));
 		SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo64, PRId64, PRIX64);
 
 		snprintf(&m_paramstr_storage[0],
 		         m_paramstr_storage.size(),
-		         prfmt, *(int64_t *)payload);
+		         prfmt, param->as<int64_t>());
 
 		break;
 	case PT_CHARBUF:
 		//
 		// Make sure the string will fit
 		//
-		if(payload_len > m_paramstr_storage.size())
+		s = param->as<std::string_view>();
+		if(s.length() + 1 > m_paramstr_storage.size())
 		{
-			m_paramstr_storage.resize(payload_len);
+			m_paramstr_storage.resize(s.length() + 1);
 		}
 
 		snprintf(&m_paramstr_storage[0],
 		         m_paramstr_storage.size(),
-		         "%s", payload);
+		         "%s", s.data());
 		break;
 	case PT_FSPATH:
 	case PT_FSRELPATH:
 	{
+		std::string_view path = param->as<std::string_view>();
 		strcpy_sanitized(&m_paramstr_storage[0],
-			payload,
-			MIN(payload_len, (uint32_t)m_paramstr_storage.size()));
+			path.data(),
+			std::min(path.size() + 1, m_paramstr_storage.size()));
 
 		sinsp_threadinfo* tinfo = get_thread_info();
 
 		if(tinfo)
 		{
-			if(strncmp(payload, "<NA>", 5) != 0)
+			if(path != "<NA>")
 			{
 				std::string cwd = get_base_dir(id, tinfo);
 
-				if(payload_len + cwd.length() >= m_resolved_paramstr_storage.size())
+				if(path.length() + cwd.length() + 1 >= m_resolved_paramstr_storage.size())
 				{
-					m_resolved_paramstr_storage.resize(payload_len + cwd.length() + 1, 0);
+					m_resolved_paramstr_storage.resize(path.length() + cwd.length() + 2, 0);
 				}
 
-				if(!sinsp_utils::concatenate_paths(&m_resolved_paramstr_storage[0],
-					(uint32_t)m_resolved_paramstr_storage.size(),
-					(char*)cwd.c_str(),
-					(uint32_t)cwd.length(),
-					payload,
-					payload_len))
+				if(path.empty() || std::filesystem::path(path).is_absolute())
 				{
 					m_resolved_paramstr_storage[0] = 0;
+				}
+				else
+				{
+					std::string concatenated_path = sinsp_utils::concatenate_paths(cwd, path);
+					strcpy_sanitized(&m_resolved_paramstr_storage[0], concatenated_path.data(), std::min(concatenated_path.size() + 1, m_resolved_paramstr_storage.size()));
 				}
 			}
 		}
@@ -1756,22 +1056,12 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	break;
 	case PT_BYTEBUF:
 	{
-		/* This would include quotes around the output string
-		            m_paramstr_storage[0] = '"';
-		            cres = binary_buffer_to_string(m_paramstr_storage + 1,
-		                param->m_val,
-		                m_paramstr_storage.size() - 2,
-		                param->m_len);
-
-		            m_paramstr_storage[cres + 1] = '"';
-		            m_paramstr_storage[cres + 2] = 0;
-		*/
 		while(true)
 		{
 			uint32_t blen = binary_buffer_to_string(&m_paramstr_storage[0],
-				payload,
+				param->m_val,
 				(uint32_t)m_paramstr_storage.size() - 1,
-				payload_len,
+				param->m_len,
 				fmt);
 
 			if(blen >= m_paramstr_storage.size() - 1)
@@ -1784,11 +1074,11 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 			}
 
 			ASSERT(m_inspector != NULL);
-			if(m_inspector->m_max_evt_output_len != 0 &&
-				blen > m_inspector->m_max_evt_output_len &&
+			if(m_inspector->get_max_evt_output_len() != 0 &&
+				blen > m_inspector->get_max_evt_output_len() &&
 				fmt == PF_NORMAL)
 			{
-				uint32_t real_len = MIN(blen, m_inspector->m_max_evt_output_len);
+				uint32_t real_len = std::min(blen, m_inspector->get_max_evt_output_len());
 
 				m_rawbuf_str_len = real_len;
 				if(real_len > 3)
@@ -1809,30 +1099,31 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	}
 	break;
 	case PT_SOCKADDR:
-		if(payload[0] == AF_UNIX)
+		sockfamily = param->m_val[0];
+		if(sockfamily == PPM_AF_UNIX)
 		{
-			ASSERT(payload_len > 1);
+			ASSERT(param->m_len > 1);
 
 			//
 			// Sanitize the file string.
 			//
-            std::string sanitized_str = payload + 1;
-	    sanitize_string(sanitized_str);
+            std::string sanitized_str = param->m_val + 1;
+			sanitize_string(sanitized_str);
 
 			snprintf(&m_paramstr_storage[0],
 				m_paramstr_storage.size(),
 				"%s",
 				sanitized_str.c_str());
 		}
-		else if(payload[0] == PPM_AF_INET)
+		else if(sockfamily == PPM_AF_INET)
 		{
-			if(payload_len == 1 + 4 + 2)
+			if(param->m_len == 1 + 4 + 2)
 			{
 				ipv4serverinfo addr;
-				addr.m_ip = *(uint32_t*)(payload + 1);
-				addr.m_port = *(uint16_t*)(payload+5);
+				memcpy(&addr.m_ip, param->m_val + 1, sizeof(addr.m_ip));
+				memcpy(&addr.m_port, param->m_val + 5, sizeof(addr.m_port));
 				addr.m_l4proto = (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN;
-				std::string straddr = ipv4serveraddr_to_string(&addr, m_inspector->m_hostname_and_port_resolution_enabled);
+				std::string straddr = ipv4serveraddr_to_string(&addr, m_inspector->is_hostname_and_port_resolution_enabled());
 				snprintf(&m_paramstr_storage[0],
 					   	 m_paramstr_storage.size(),
 					   	 "%s",
@@ -1846,15 +1137,15 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 				         "INVALID IPv4");
 			}
 		}
-		else if(payload[0] == PPM_AF_INET6)
+		else if(sockfamily == PPM_AF_INET6)
 		{
-			if(payload_len == 1 + 16 + 2)
+			if(param->m_len == 1 + 16 + 2)
 			{
 				ipv6serverinfo addr;
-				memcpy((uint8_t *) addr.m_ip.m_b, (uint8_t *) payload+1, sizeof(addr.m_ip.m_b));
-				addr.m_port = *(uint16_t*)(payload+17);
+				memcpy((uint8_t *) addr.m_ip.m_b, (uint8_t *) param->m_val + 1, sizeof(addr.m_ip.m_b));
+				memcpy(&addr.m_port, param->m_val + 17, sizeof(addr.m_port));
 				addr.m_l4proto = (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN;
-				std::string straddr = ipv6serveraddr_to_string(&addr, m_inspector->m_hostname_and_port_resolution_enabled);
+				std::string straddr = ipv6serveraddr_to_string(&addr, m_inspector->is_hostname_and_port_resolution_enabled());
 				snprintf(&m_paramstr_storage[0],
 					   	 m_paramstr_storage.size(),
 					   	 "%s",
@@ -1872,21 +1163,22 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		{
 			snprintf(&m_paramstr_storage[0],
 			         m_paramstr_storage.size(),
-			         "family %d", (int)payload[0]);
+			         "family %d", sockfamily);
 		}
 		break;
 	case PT_SOCKTUPLE:
-		if(payload[0] == PPM_AF_INET)
+		sockfamily = param->m_val[0];
+		if(sockfamily == PPM_AF_INET)
 		{
-			if(payload_len == 1 + 4 + 2 + 4 + 2)
+			if(param->m_len == 1 + 4 + 2 + 4 + 2)
 			{
 				ipv4tuple addr;
-				addr.m_fields.m_sip = *(uint32_t*)(payload + 1);
-				addr.m_fields.m_sport = *(uint16_t*)(payload+5);
-				addr.m_fields.m_dip = *(uint32_t*)(payload + 7);
-				addr.m_fields.m_dport = *(uint16_t*)(payload+11);
+				memcpy(&addr.m_fields.m_sip, param->m_val + 1, sizeof(uint32_t));
+				memcpy(&addr.m_fields.m_sport, param->m_val + 5, sizeof(uint16_t));
+				memcpy(&addr.m_fields.m_dip, param->m_val + 7, sizeof(uint32_t));
+				memcpy(&addr.m_fields.m_dport, param->m_val + 11, sizeof(uint16_t));
 				addr.m_fields.m_l4proto = (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN;
-				std::string straddr = ipv4tuple_to_string(&addr, m_inspector->m_hostname_and_port_resolution_enabled);
+				std::string straddr = ipv4tuple_to_string(&addr, m_inspector->is_hostname_and_port_resolution_enabled());
 				snprintf(&m_paramstr_storage[0],
 					   	 m_paramstr_storage.size(),
 					   	 "%s",
@@ -1900,24 +1192,24 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 				         "INVALID IPv4");
 			}
 		}
-		else if(payload[0] == PPM_AF_INET6)
+		else if(sockfamily == PPM_AF_INET6)
 		{
-			if(payload_len == 1 + 16 + 2 + 16 + 2)
+			if(param->m_len == 1 + 16 + 2 + 16 + 2)
 			{
-				uint8_t* sip6 = (uint8_t*)payload + 1;
-				uint8_t* dip6 = (uint8_t*)payload + 19;
-				uint8_t* sip = (uint8_t*)payload + 13;
-				uint8_t* dip = (uint8_t*)payload + 31;
+				uint8_t* sip6 = (uint8_t*)param->m_val + 1;
+				uint8_t* dip6 = (uint8_t*)param->m_val + 19;
+				uint8_t* sip = (uint8_t*)param->m_val + 13;
+				uint8_t* dip = (uint8_t*)param->m_val + 31;
 
 				if(sinsp_utils::is_ipv4_mapped_ipv6(sip6) && sinsp_utils::is_ipv4_mapped_ipv6(dip6))
 				{
 					ipv4tuple addr;
-					addr.m_fields.m_sip = *(uint32_t*)sip;
-					addr.m_fields.m_sport = *(uint16_t*)(payload+17);
-					addr.m_fields.m_dip = *(uint32_t*)dip;
-					addr.m_fields.m_dport = *(uint16_t*)(payload+35);
+					memcpy(&addr.m_fields.m_sip, sip, sizeof(uint32_t));
+					memcpy(&addr.m_fields.m_sport, param->m_val + 17, sizeof(uint16_t));
+					memcpy(&addr.m_fields.m_dip, dip, sizeof(uint32_t));
+					memcpy(&addr.m_fields.m_dport, param->m_val + 35, sizeof(uint16_t));
 					addr.m_fields.m_l4proto = (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN;
-					std::string straddr = ipv4tuple_to_string(&addr, m_inspector->m_hostname_and_port_resolution_enabled);
+					std::string straddr = ipv4tuple_to_string(&addr, m_inspector->is_hostname_and_port_resolution_enabled());
 
 					snprintf(&m_paramstr_storage[0],
 							 m_paramstr_storage.size(),
@@ -1932,13 +1224,16 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 					if(inet_ntop(AF_INET6, sip6, srcstr, sizeof(srcstr)) &&
 						inet_ntop(AF_INET6, dip6, dststr, sizeof(dststr)))
 					{
+						uint16_t srcport, dstport;
+						memcpy(&srcport, param->m_val + 17, sizeof(srcport));
+						memcpy(&dstport, param->m_val + 35, sizeof(dstport));
 						snprintf(&m_paramstr_storage[0],
 								 m_paramstr_storage.size(),
 								 "%s:%s->%s:%s",
 								 srcstr,
-								 port_to_string(*(uint16_t*)(payload + 17), (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN, m_inspector->m_hostname_and_port_resolution_enabled).c_str(),
+								 port_to_string(srcport, (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN, m_inspector->is_hostname_and_port_resolution_enabled()).c_str(),
 								 dststr,
-								 port_to_string(*(uint16_t*)(payload + 35), (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN, m_inspector->m_hostname_and_port_resolution_enabled).c_str());
+								 port_to_string(dstport, (m_fdinfo != NULL) ? m_fdinfo->get_l4proto() : SCAP_L4_UNKNOWN, m_inspector->is_hostname_and_port_resolution_enabled()).c_str());
 						break;
 					}
 				}
@@ -1949,28 +1244,32 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 				        m_paramstr_storage.size(),
 				        "INVALID IPv6");
 		}
-		else if(payload[0] == AF_UNIX)
+		else if(sockfamily == PPM_AF_UNIX)
 		{
-			ASSERT(payload_len > 17);
+			ASSERT(param->m_len > 17);
 
 			//
 			// Sanitize the file string.
 			//
-            std::string sanitized_str = payload + 17;
-	    sanitize_string(sanitized_str);
+			std::string sanitized_str = param->m_val + 17;
+			sanitize_string(sanitized_str);
+
+			uint64_t src, dst;
+			memcpy(&src, param->m_val + 1, sizeof(uint64_t));
+			memcpy(&dst, param->m_val + 9, sizeof(uint64_t));
 
 			snprintf(&m_paramstr_storage[0],
 				m_paramstr_storage.size(),
 				"%" PRIx64 "->%" PRIx64 " %s",
-				*(uint64_t*)(payload + 1),
-				*(uint64_t*)(payload + 9),
+				src,
+				dst,
 				sanitized_str.c_str());
 		}
 		else
 		{
 			snprintf(&m_paramstr_storage[0],
 			         m_paramstr_storage.size(),
-			         "family %d", (int)payload[0]);
+			         "family %d", sockfamily);
 		}
 		break;
 	case PT_FDLIST:
@@ -1981,7 +1280,8 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 				break;
 			}
 
-			uint16_t nfds = *(uint16_t *)payload;
+			uint16_t nfds = 0;
+			memcpy(&nfds, param->m_val, sizeof(nfds));
 			uint32_t pos = 2;
 			uint32_t spos = 0;
 
@@ -1990,9 +1290,10 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 			for(j = 0; j < nfds; j++)
 			{
 				char tch;
-				int64_t fd = *(int64_t *)(payload + pos);
+				int64_t fd = 0;
+				memcpy(&fd, param->m_val + pos, sizeof(uint64_t));
 
-				sinsp_fdinfo_t *fdinfo = tinfo->get_fd(fd);
+				sinsp_fdinfo *fdinfo = tinfo->get_fd(fd);
 				if(fdinfo)
 				{
 					tch = fdinfo->get_typechar();
@@ -2002,12 +1303,15 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 					tch = '?';
 				}
 
+				int16_t p8;
+				memcpy(&p8, param->m_val + pos + 8, sizeof(int16_t));
+
 				int r = snprintf(&m_paramstr_storage[0] + spos,
 						m_paramstr_storage.size() - spos,
 						"%" PRIu64 ":%c%x%c",
 						fd,
 						tch,
-						(uint32_t) * (int16_t *)(payload + pos + 8),
+						(uint32_t) p8,
 						(j < (uint32_t)(nfds - 1)) ? ' ' : '\0');
 
 				if(r < 0 || spos + r >= m_paramstr_storage.size() - 1)
@@ -2023,7 +1327,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		break;
 	case PT_SYSCALLID:
 		{
-			uint16_t ppm_sc  = *(uint16_t *)payload;
+			uint16_t ppm_sc = param->as<uint16_t>();
 			if(ppm_sc >= PPM_SC_MAX)
 			{
 				ASSERT(false);
@@ -2048,8 +1352,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		{
 			const char* sigstr;
 
-			ASSERT(payload_len == sizeof(uint8_t));
-			uint8_t val = *(uint8_t *)payload;
+			uint8_t val = param->as<uint8_t>();
 
 			sigstr = sinsp_utils::signal_to_str(val);
 
@@ -2069,8 +1372,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		{
 			std::string sigstr;
 
-			ASSERT(payload_len == sizeof(uint64_t));
-			uint64_t val = *(uint64_t *)payload;
+			uint64_t val = param->as<uint64_t>();
 
 			if(val == (uint64_t)(-1))
 			{
@@ -2104,15 +1406,15 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 			{
 			case PT_FLAGS8:
 			case PT_ENUMFLAGS8:
-				val = *(uint8_t *)payload;
+				val = param->as<uint8_t>();
 				break;
 			case PT_FLAGS16:
 			case PT_ENUMFLAGS16:
-				val = *(uint16_t *)payload;
+				val = param->as<uint16_t>();
 				break;
 			case PT_FLAGS32:
 			case PT_ENUMFLAGS32:
-				val = *(uint32_t *)payload;
+				val = param->as<uint32_t>();
 				break;
 			default:
 				ASSERT(false);
@@ -2121,7 +1423,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 				     m_paramstr_storage.size(),
 				     "%" PRIu32, val);
 
-			const struct ppm_name_value *flags = (const struct ppm_name_value *)m_info->params[id].info;
+			auto flags = (const ppm_name_value*)m_info->params[id].info;
 			const bool exact_match = param_info->type == PT_ENUMFLAGS8 || param_info->type == PT_ENUMFLAGS16 || param_info->type == PT_ENUMFLAGS32;
 			const char *separator = "";
 			uint32_t initial_val = val;
@@ -2177,13 +1479,13 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		}
 	case PT_MODE:
 		{
-			uint32_t val = *(uint32_t *)payload;
+			uint32_t val = param->as<uint32_t>();
 			SET_NUMERIC_FORMAT(prfmt, param_fmt, PRIo32, PRId32, PRIX32);
 			snprintf(&m_paramstr_storage[0],
 					m_paramstr_storage.size(),
 					prfmt, val);
 
-			const struct ppm_name_value *mode = (const struct ppm_name_value *)m_info->params[id].info;
+			auto mode = (const ppm_name_value*)m_info->params[id].info;
 			const char *separator = "";
 			uint32_t initial_val = val;
 			uint32_t j = 0;
@@ -2227,8 +1529,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		}
 	case PT_ABSTIME:
 		{
-			ASSERT(payload_len == sizeof(uint64_t));
-			uint64_t val = *(uint64_t *)payload;
+			uint64_t val = param->as<uint64_t>();
 			time_t sec = val / 1000000000ULL;
 			unsigned long nsec = val % 1000000000ULL;
 			struct tm tm;
@@ -2236,7 +1537,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 			strftime(&m_paramstr_storage[0],
 				m_paramstr_storage.size(),
 				"%Y-%m-%d %H:%M:%S.XXXXXXXXX %z", &tm);
-			snprintf(&m_paramstr_storage[20], 9, "%09ld", nsec);
+			snprintf(&m_paramstr_storage[20], 10, "%09ld", nsec);
 			break;
 		}
 	case PT_DYN:
@@ -2247,7 +1548,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 		break;
 	case PT_UID:
 	{
-		uint32_t val = *(uint32_t *)payload;
+		uint32_t val = param->as<uint32_t>();
 		if (val < std::numeric_limits<uint32_t>::max())
 		{
 			// Note: we want to resolve user given the uid
@@ -2289,7 +1590,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	}
 	case PT_GID:
 	{
-		uint32_t val = *(uint32_t *)payload;
+		uint32_t val = param->as<uint32_t>();
 		if (val < std::numeric_limits<uint32_t>::max())
 		{
 			// Note: we want to resolve group given the gid
@@ -2476,8 +1777,7 @@ const char* sinsp_evt::get_param_as_str(uint32_t id, OUT const char** resolved_s
 	}
 	case PT_SIGSET:
 	{
-		ASSERT(payload_len == sizeof(uint32_t));
-		uint32_t val = *(uint32_t *)payload;
+		uint32_t val = param->as<uint32_t>();
 
 		m_resolved_paramstr_storage[0] = '\0';
 		m_paramstr_storage[0]          = '\0';
@@ -2574,34 +1874,7 @@ const char* sinsp_evt::get_param_value_str(const char* name, OUT const char** re
 	return NULL;
 }
 
-const sinsp_evt_param* sinsp_evt::get_param_value_raw(const char* name)
-{
-	//
-	// Make sure the params are actually loaded
-	//
-	if((m_flags & sinsp_evt::SINSP_EF_PARAMS_LOADED) == 0)
-	{
-		load_params();
-		m_flags |= (uint32_t)sinsp_evt::SINSP_EF_PARAMS_LOADED;
-	}
-
-	//
-	// Locate the parameter given the name
-	//
-	uint32_t np = get_num_params();
-
-	for(uint32_t j = 0; j < np; j++)
-	{
-		if(strcmp(name, get_param_name(j)) == 0)
-		{
-			return &(m_params[j]);
-		}
-	}
-
-	return NULL;
-}
-
-void sinsp_evt::get_category(OUT sinsp_evt::category* cat)
+void sinsp_evt::get_category(OUT sinsp_evt::category* cat) const
 {
 	/* We always search the category inside the event table */
 	cat->m_category = get_category();
@@ -2651,6 +1924,8 @@ void sinsp_evt::get_category(OUT sinsp_evt::category* cat)
 				case SCAP_FD_BPF:
 				case SCAP_FD_IOURING:
 				case SCAP_FD_NETLINK:
+				case SCAP_FD_MEMFD:
+				case SCAP_FD_PIDFD:
 					cat->m_subcategory = SC_OTHER;
 					break;
 				case SCAP_FD_UNKNOWN:
@@ -2668,19 +1943,19 @@ void sinsp_evt::get_category(OUT sinsp_evt::category* cat)
 	}
 }
 
-bool sinsp_evt::is_filtered_out()
+bool sinsp_evt::is_filtered_out() const
 {
 	return m_filtered_out;
 }
 
-scap_dump_flags sinsp_evt::get_dump_flags(OUT bool* should_drop)
+scap_dump_flags sinsp_evt::get_dump_flags(OUT bool* should_drop) const
 {
 	uint32_t dflags = SCAP_DF_NONE;
 	*should_drop = false;
 
 	if(m_filtered_out)
 	{
-		if(m_inspector->m_isfatfile_enabled)
+		if(m_inspector->is_fatfile_enabled())
 		{
 			ppm_event_flags eflags = get_info_flags();
 
@@ -2706,11 +1981,6 @@ scap_dump_flags sinsp_evt::get_dump_flags(OUT bool* should_drop)
 				*should_drop = false;
 			}
 		}
-	}
-
-	if(m_flags & sinsp_evt::SINSP_EF_IS_TRACER)
-	{
-		dflags |= SCAP_DF_TRACER;
 	}
 
 	if(get_info_flags() & EF_LARGE_PAYLOAD)
@@ -2775,7 +2045,6 @@ uint64_t sinsp_evt::get_lastevent_ts() const
 bool sinsp_evt::clone_event(sinsp_evt &dest, const sinsp_evt &src)
 {
 	dest.m_inspector = src.m_inspector;
-	dest.m_poriginal_evt = nullptr;
 
 	// tinfo
 	if (src.m_tinfo_ref && src.m_tinfo && src.m_tinfo_ref.get() != src.m_tinfo)
@@ -2807,8 +2076,8 @@ bool sinsp_evt::clone_event(sinsp_evt &dest, const sinsp_evt &src)
 
 	if (src.m_pevt != nullptr)
 	{
-		dest.m_pevt_storage = new char[src.m_pevt->len];
-		memcpy(dest.m_pevt_storage, src.m_pevt, src.m_pevt->len);
+		dest.m_pevt_storage = new char[src.get_scap_evt()->len];
+		memcpy(dest.m_pevt_storage, src.m_pevt, src.get_scap_evt()->len);
 		dest.m_pevt = (scap_evt *) dest.m_pevt_storage;
 	}
 	else
@@ -2839,14 +2108,87 @@ bool sinsp_evt::clone_event(sinsp_evt &dest, const sinsp_evt &src)
 
 	// fd info
 	dest.m_fdinfo = nullptr;
+	dest.m_fdinfo_ref.reset();
 	if (src.m_fdinfo != nullptr)
 	{
 		//m_fdinfo_ref is only used to keep a handle to this
 		// copy of the fdinfo which was copied from the global fdinfo table
-		dest.m_fdinfo_ref.reset(new sinsp_fdinfo_t(*src.m_fdinfo));
+		dest.m_fdinfo_ref = src.m_fdinfo->clone();
 		dest.m_fdinfo = dest.m_fdinfo_ref.get();
 	}
 	dest.m_fdinfo_name_changed = src.m_fdinfo_name_changed;
 
 	return true;
+}
+
+void sinsp_evt::save_enter_event_params(sinsp_evt* enter_evt)
+{
+	static std::vector<const char *> path_param = {"path"};
+	static std::vector<const char *> oldpath_newpath_param = {"oldpath", "newpath"};
+	static std::vector<const char *> name_param = {"name"};
+
+	std::vector<const char *> *pnames = NULL;
+	switch(get_type())
+	{
+	case PPME_SYSCALL_MKDIR_X:
+	case PPME_SYSCALL_RMDIR_X:
+	case PPME_SYSCALL_UNLINK_X:
+		pnames = &path_param;
+		break;
+
+	case PPME_SYSCALL_LINK_X:
+	case PPME_SYSCALL_LINKAT_X:
+		pnames = &oldpath_newpath_param;
+		break;
+	case PPME_SYSCALL_UNLINKAT_X:
+	case PPME_SYSCALL_OPENAT_X:
+		pnames = &name_param;
+		break;
+	};
+
+	if(!pnames)
+	{
+		return;
+	}
+
+	for(const char *pname : (*pnames))
+	{
+		const sinsp_evt_param *param;
+
+		param = enter_evt->get_param_by_name(pname);
+		if(param)
+		{
+			std::string val {param->as<std::string_view>()};
+			m_enter_path_param[pname] = val;
+		}
+	}
+}
+
+std::optional<std::reference_wrapper<const std::string>> sinsp_evt::get_enter_evt_param(const std::string& param) const
+{
+	auto it = m_enter_path_param.find(param);
+
+	if(it != m_enter_path_param.end())
+	{
+		return it->second;
+	}
+
+	return std::nullopt;
+}
+
+void sinsp_evt_param::throw_invalid_len_error(size_t requested_length) const
+{
+	const ppm_param_info* parinfo = get_info();
+
+	std::stringstream ss;
+	ss << "could not parse param " << m_idx << " (" << parinfo->name << ") for event "
+		<< m_evt->get_num() << " of type " << m_evt->get_type() << " (" << m_evt->get_name() << "): expected length "
+		<< requested_length << ", found " << m_len;
+
+	throw sinsp_exception(ss.str());
+}
+
+const ppm_param_info* sinsp_evt_param::get_info() const
+{
+	return &(m_evt->get_info()->params[m_idx]);
 }

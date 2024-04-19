@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +22,7 @@ limitations under the License.
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/mman.h>
-#include <ppm_events_public.h>
+#include <driver/ppm_events_public.h>
 
 #include "ringbuffer_definitions.h"
 
@@ -122,7 +123,10 @@ static bool is_cpu_online(uint16_t cpu_id)
 		}
 	}
 
-	fscanf(fp, "%d", &online);
+	if(fscanf(fp, "%d", &online) != 1)
+	{
+		online = 0;
+	}
 	fclose(fp);
 	return online == 1;
 }
@@ -196,6 +200,16 @@ int pman_finalize_ringbuf_array_after_loading()
 		if(g_state.allocate_online_only && !is_cpu_online(i))
 		{
 			continue;
+		}
+
+		if(ringbuf_id >= g_state.n_required_buffers)
+		{
+			/* If we arrive here it means that we have too many CPUs for our allocated ring buffers
+			 * so probably we faced a CPU hotplug.
+			 */
+			snprintf(error_message, MAX_ERROR_MESSAGE_LEN, "the actual system configuration requires more than '%d' ring buffers", g_state.n_required_buffers);
+			pman_print_error((const char *)error_message);
+			goto clean_percpu_ring_buffers;
 		}
 
 		if(bpf_map_update_elem(ringubuf_array_fd, &i, &ringbufs_fds[ringbuf_id], BPF_ANY))
@@ -283,14 +297,14 @@ static void ringbuf__consume_first_event(struct ring_buffer *rb, struct ppm_evt_
 	/* If the last consume operation was successful we can push the consumer position */
 	if(g_state.last_ring_read != -1)
 	{
-		struct ring *r = &(rb->rings[g_state.last_ring_read]);
+		struct ring *r = rb->rings[g_state.last_ring_read];
 		g_state.cons_pos[g_state.last_ring_read] += g_state.last_event_size;
 		smp_store_release(r->consumer_pos, g_state.cons_pos[g_state.last_ring_read]);
 	}
 
 	for(uint16_t pos = 0; pos < rb->ring_cnt; pos++)
 	{
-		*event_ptr = ringbuf__get_first_ring_event(&rb->rings[pos], pos);
+		*event_ptr = ringbuf__get_first_ring_event(rb->rings[pos], pos);
 
 		/* if NULL search for events in another buffer */
 		if(*event_ptr == NULL)

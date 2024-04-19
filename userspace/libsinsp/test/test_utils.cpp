@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,18 +19,22 @@ limitations under the License.
 #include "test_utils.h"
 
 #include <cstring>
-#include <linux/un.h>
+
+#if !defined(_WIN32)
 #include <arpa/inet.h>
+#endif //_WIN32
 #include <stdint.h>
 
-#include "ppm_events_public.h"
-#include "userspace_flag_helpers.h"
+#include <driver/ppm_events_public.h>
+#include <libscap/userspace_flag_helpers.h>
+#include <strl.h>
 
 namespace test_utils {
 
-struct sockaddr_in fill_sockaddr_in(int32_t ipv4_port, const char* ipv4_string)
+#if !defined(_WIN32)
+sockaddr_in fill_sockaddr_in(int32_t ipv4_port, const char* ipv4_string)
 {
-	struct sockaddr_in sockaddr;
+	sockaddr_in sockaddr;
 	memset(&sockaddr, 0, sizeof(sockaddr));
 	sockaddr.sin_family = AF_INET;
 	sockaddr.sin_port = htons(ipv4_port);
@@ -37,15 +42,25 @@ struct sockaddr_in fill_sockaddr_in(int32_t ipv4_port, const char* ipv4_string)
 	return sockaddr;
 }
 
-struct sockaddr_in6 fill_sockaddr_in6(int32_t ipv6_port, const char* ipv6_string)
+sockaddr_in6 fill_sockaddr_in6(int32_t ipv6_port, const char* ipv6_string)
 {
-	struct sockaddr_in6 sockaddr;
+	sockaddr_in6 sockaddr;
 	memset(&sockaddr, 0, sizeof(sockaddr));
 	sockaddr.sin6_family = AF_INET6;
 	sockaddr.sin6_port = htons(ipv6_port);
 	inet_pton(AF_INET6, ipv6_string, &(sockaddr.sin6_addr));
 	return sockaddr;
 }
+
+struct sockaddr_un fill_sockaddr_un(const char* unix_path)
+{
+	struct sockaddr_un sockaddr;
+	memset(&sockaddr, 0, sizeof(sockaddr));
+	sockaddr.sun_family = AF_UNIX;
+	strlcpy(sockaddr.sun_path, unix_path, UNIX_PATH_MAX);
+	return sockaddr;
+}
+#endif //_WIN32
 
 std::string to_null_delimited(const std::vector<std::string> list)
 {
@@ -111,6 +126,7 @@ inline void vecbuf_append(std::vector<uint8_t> &dest, void* src, size_t size)
 	}
 }
 
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(__APPLE__)
 std::vector<uint8_t> pack_addr(sockaddr *sa)
 {
 	std::vector<uint8_t> res;
@@ -245,5 +261,31 @@ std::vector<uint8_t> pack_socktuple(sockaddr *src, sockaddr *dest)
 
 	return res;
 }
+
+std::vector<uint8_t> pack_unix_socktuple(uint64_t scr_pointer, uint64_t dst_pointer, std::string unix_path)
+{
+	std::vector<uint8_t> res;
+
+	// Assert family.
+	res.push_back(PPM_AF_UNIX);
+
+	// Scr pointer 
+	for (size_t i = 0; i < sizeof(scr_pointer); ++i)
+	{
+    	res.push_back(scr_pointer & 0xFF);
+    	scr_pointer >>= 8;
+	}
+
+	// Dest pointer 
+	for (size_t i = 0; i < sizeof(dst_pointer); ++i)
+	{
+    	res.push_back(dst_pointer & 0xFF);
+    	dst_pointer >>= 8;
+	}
+
+	res.insert(res.end(), unix_path.begin(), unix_path.end());
+	return res;
+}
+#endif //_WIN32 __EMSCRIPTEN__
 
 } // namespace test_utils

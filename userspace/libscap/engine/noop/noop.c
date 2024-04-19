@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,9 +26,9 @@ struct noop_engine
 
 #define SCAP_HANDLE_T struct noop_engine
 
-#include "noop.h"
-#include "scap.h"
-#include "strlcpy.h"
+#include <libscap/engine/noop/noop.h>
+#include <libscap/scap.h>
+#include <libscap/strl.h>
 
 struct noop_engine* noop_alloc_handle(scap_t* main_handle, char* lasterr_ptr)
 {
@@ -49,7 +50,7 @@ int noop_close_engine(struct scap_engine_handle engine)
 	return SCAP_SUCCESS;
 }
 
-int32_t noop_next(struct scap_engine_handle handle, scap_evt** pevent, uint16_t* pcpuid)
+int32_t noop_next(struct scap_engine_handle handle, scap_evt** pevent, uint16_t* pdevid, uint32_t* pflags)
 {
 	return SCAP_EOF;
 }
@@ -86,7 +87,7 @@ int32_t noop_get_stats(struct scap_engine_handle engine, scap_stats* stats)
 	return SCAP_SUCCESS;
 }
 
-const struct scap_stats_v2* noop_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, uint32_t* nstats, int32_t* rc)
+const struct metrics_v2* noop_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, uint32_t* nstats, int32_t* rc)
 {
 	*rc = SCAP_SUCCESS;
 	*nstats = 0;
@@ -108,24 +109,8 @@ uint64_t noop_get_max_buf_used(struct scap_engine_handle engine)
 	return SCAP_SUCCESS;
 }
 
-int32_t noop_get_threadlist(struct scap_engine_handle engine, struct ppm_proclist_info **procinfo_p, char *lasterr)
-{
-	return SCAP_NOT_SUPPORTED;
-}
-
-int32_t noop_get_vxid(struct scap_engine_handle engine, uint64_t xid, int64_t* vxid)
-{
-	return SCAP_NOT_SUPPORTED;
-}
-
-int32_t noop_getpid_global(struct scap_engine_handle engine, int64_t* pid, char* error)
-{
-	return SCAP_NOT_SUPPORTED;
-}
-
 const struct scap_vtable scap_noop_engine = {
 	.name = "noop",
-	.mode = SCAP_MODE_NODRIVER,
 	.savefile_ops = NULL,
 
 	.alloc_handle = noop_alloc_handle,
@@ -141,10 +126,6 @@ const struct scap_vtable scap_noop_engine = {
 	.get_n_tracepoint_hit = noop_get_n_tracepoint_hit,
 	.get_n_devs = noop_get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,
-	.get_threadlist = noop_get_threadlist,
-	.get_vpid = noop_get_vxid,
-	.get_vtid = noop_get_vxid,
-	.getpid_global = noop_getpid_global,
 	.get_api_version = NULL,
 	.get_schema_version = NULL,
 };

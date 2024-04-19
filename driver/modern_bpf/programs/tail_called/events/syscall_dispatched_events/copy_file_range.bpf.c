@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -15,25 +16,25 @@ int BPF_PROG(copy_file_range_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, COPY_FILE_RANGE_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, COPY_FILE_RANGE_E_SIZE, PPME_SYSCALL_COPY_FILE_RANGE_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_COPY_FILE_RANGE_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: fdin (type: PT_FD) */
-	s32 fdin = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)fdin);
+	int32_t fdin = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fdin);
 
 	/* Parameter 2: offin (type: PT_UINT64) */
-	u64 offin = extract__syscall_argument(regs, 1);
+	uint64_t offin = extract__syscall_argument(regs, 1);
 	ringbuf__store_u64(&ringbuf, offin);
 
 	/* Parameter 3: len (type: PT_UINT64) */
-	u64 len = extract__syscall_argument(regs, 4);
+	uint64_t len = extract__syscall_argument(regs, 4);
 	ringbuf__store_u64(&ringbuf, len);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
@@ -53,12 +54,12 @@ int BPF_PROG(copy_file_range_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, COPY_FILE_RANGE_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, COPY_FILE_RANGE_X_SIZE, PPME_SYSCALL_COPY_FILE_RANGE_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_COPY_FILE_RANGE_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -66,11 +67,11 @@ int BPF_PROG(copy_file_range_x,
 	ringbuf__store_s64(&ringbuf, ret);
 
 	/* Parameter 2: fdout (type: PT_FD) */
-	s32 fdout = (s32)extract__syscall_argument(regs, 2);
-	ringbuf__store_s64(&ringbuf, (s64)fdout);
+	int32_t fdout = (int32_t)extract__syscall_argument(regs, 2);
+	ringbuf__store_s64(&ringbuf, (int64_t)fdout);
 
 	/* Parameter 3: offout (type: PT_UINT64) */
-	u64 offout = extract__syscall_argument(regs, 3);
+	uint64_t offout = extract__syscall_argument(regs, 3);
 	ringbuf__store_u64(&ringbuf, offout);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

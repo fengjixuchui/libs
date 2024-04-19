@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,10 +16,10 @@ limitations under the License.
 
 */
 
-#include "sinsp.h"
-#include "sinsp_int.h"
-#include "scap.h"
-#include "dumper.h"
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
+#include <libscap/scap.h>
+#include <libsinsp/dumper.h>
 
 sinsp_dumper::sinsp_dumper()
 {
@@ -43,74 +44,54 @@ sinsp_dumper::~sinsp_dumper()
 	}
 }
 
-void sinsp_dumper::open(sinsp* inspector, const std::string& filename, bool compress, bool threads_from_sinsp)
+void sinsp_dumper::open(sinsp* inspector, const std::string& filename, bool compress)
 {
-	if(inspector->m_h == NULL)
+	char error[SCAP_LASTERR_SIZE];
+	if(inspector->get_scap_handle() == NULL)
 	{
 		throw sinsp_exception("can't start event dump, inspector not opened yet");
 	}
 
 	if(m_target_memory_buffer)
 	{
-		m_dumper = scap_memory_dump_open(inspector->m_h, m_target_memory_buffer, m_target_memory_buffer_size);
+		m_dumper = scap_memory_dump_open(inspector->get_scap_platform(), m_target_memory_buffer, m_target_memory_buffer_size, error);
 	}
 	else
 	{
-		if(compress)
-		{
-			m_dumper = scap_dump_open(inspector->m_h, filename.c_str(), SCAP_COMPRESSION_GZIP, threads_from_sinsp);
-		}
-		else
-		{
-			m_dumper = scap_dump_open(inspector->m_h, filename.c_str(), SCAP_COMPRESSION_NONE, threads_from_sinsp);
-		}
+		auto compress_mode = compress ? SCAP_COMPRESSION_GZIP : SCAP_COMPRESSION_NONE;
+		m_dumper = scap_dump_open(inspector->get_scap_platform(), filename.c_str(), compress_mode, error);
 	}
 
-	if(m_dumper == NULL)
+	if(m_dumper == nullptr)
 	{
-		throw sinsp_exception(scap_getlasterr(inspector->m_h));
+		throw sinsp_exception(error);
 	}
 
-	if(threads_from_sinsp)
-	{
-		inspector->m_thread_manager->dump_threads_to_file(m_dumper);
-	}
-
+	inspector->m_thread_manager->dump_threads_to_file(m_dumper);
 	inspector->m_container_manager.dump_containers(*this);
-
 	inspector->m_usergroup_manager.dump_users_groups(*this);
 
 	m_nevts = 0;
 }
 
-void sinsp_dumper::fdopen(sinsp* inspector, int fd, bool compress, bool threads_from_sinsp)
+void sinsp_dumper::fdopen(sinsp* inspector, int fd, bool compress)
 {
-	if(inspector->m_h == NULL)
+	char error[SCAP_LASTERR_SIZE];
+	if(inspector->get_scap_handle() == NULL)
 	{
 		throw sinsp_exception("can't start event dump, inspector not opened yet");
 	}
 
-	if(compress)
+	auto compress_mode = compress ? SCAP_COMPRESSION_GZIP : SCAP_COMPRESSION_NONE;
+	m_dumper = scap_dump_open_fd(inspector->get_scap_platform(), fd, compress_mode, true, error);
+
+	if(m_dumper == nullptr)
 	{
-		m_dumper = scap_dump_open_fd(inspector->m_h, fd, SCAP_COMPRESSION_GZIP, threads_from_sinsp);
-	}
-	else
-	{
-		m_dumper = scap_dump_open_fd(inspector->m_h, fd, SCAP_COMPRESSION_NONE, threads_from_sinsp);
+		throw sinsp_exception(error);
 	}
 
-	if(m_dumper == NULL)
-	{
-		throw sinsp_exception(scap_getlasterr(inspector->m_h));
-	}
-
-	if(threads_from_sinsp)
-	{
-		inspector->m_thread_manager->dump_threads_to_file(m_dumper);
-	}
-
+	inspector->m_thread_manager->dump_threads_to_file(m_dumper);
 	inspector->m_container_manager.dump_containers(*this);
-
 	inspector->m_usergroup_manager.dump_users_groups(*this);
 
 	m_nevts = 0;
@@ -142,7 +123,7 @@ void sinsp_dumper::dump(sinsp_evt* evt)
 		throw sinsp_exception("dumper not opened yet");
 	}
 
-	scap_evt* pdevt = (evt->m_poriginal_evt)? evt->m_poriginal_evt : evt->m_pevt;
+	scap_evt* pdevt = evt->get_scap_evt();
 	bool do_drop = false;
 	scap_dump_flags dflags;
 
@@ -152,7 +133,7 @@ void sinsp_dumper::dump(sinsp_evt* evt)
 		return;
 	}
 
-	int32_t res = scap_dump(m_dumper, pdevt, evt->m_cpuid, dflags);
+	int32_t res = scap_dump(m_dumper, pdevt, evt->get_cpuid(), dflags);
 
 	if(res != SCAP_SUCCESS)
 	{

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,18 +16,18 @@ int BPF_PROG(getdents_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, GETDENTS_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, GETDENTS_E_SIZE, PPME_SYSCALL_GETDENTS_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_GETDENTS_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: fd (type: PT_FD)*/
-	s32 fd = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -45,12 +46,12 @@ int BPF_PROG(getdents_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, GETDENTS_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, GETDENTS_X_SIZE, PPME_SYSCALL_GETDENTS_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_GETDENTS_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

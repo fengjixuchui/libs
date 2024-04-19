@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -16,11 +17,6 @@
 
 /* Right now a `cgroup` pathname can have at most 6 components. */
 #define MAX_CGROUP_PATH_POINTERS 6
-
-/* Right now a file path extracted from a file descriptor can
- * have at most `MAX_PATH_POINTERS` components.
- */
-#define MAX_PATH_POINTERS 8
 
 /* Maximum length of `unix` socket path.
  * We can have a maximum of 108 characters plus the `\0` terminator.
@@ -58,11 +54,11 @@
 #define USEC_FACTOR 1000
 
 /* Network components size. */
-#define FAMILY_SIZE sizeof(u8)
-#define IPV4_SIZE sizeof(u32)
+#define FAMILY_SIZE sizeof(uint8_t)
+#define IPV4_SIZE sizeof(uint32_t)
 #define IPV6_SIZE 16
-#define PORT_SIZE sizeof(u16)
-#define KERNEL_POINTER sizeof(u64)
+#define PORT_SIZE sizeof(uint16_t)
+#define KERNEL_POINTER sizeof(uint64_t)
 
 /* This enum is used to tell network helpers if the connection outbound
  * or inbound

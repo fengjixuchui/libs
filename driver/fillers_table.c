@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -13,7 +14,7 @@ or GPL2.txt for full copies of the license.
 #include "ppm.h"
 #endif /* __KERNEL__ */
 
-#if defined(__KERNEL__) || defined(UDIG)
+#if defined(__KERNEL__)
 #define FILLER_REF(x) f_##x, PPM_FILLER_##x
 #else
 #define FILLER_REF(x) 0, PPM_FILLER_##x
@@ -21,6 +22,8 @@ or GPL2.txt for full copies of the license.
 
 #define f_sys_socket_x f_sys_single_x
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_GENERIC_E] = {FILLER_REF(sys_generic)},
 	[PPME_GENERIC_X] = {FILLER_REF(sys_generic)},
@@ -39,7 +42,7 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_SOCKET_BIND_X] = {FILLER_REF(sys_socket_bind_x)},
 	[PPME_SOCKET_CONNECT_E] = {FILLER_REF(sys_connect_e)},
 	[PPME_SOCKET_CONNECT_X] = {FILLER_REF(sys_connect_x)},
-	[PPME_SOCKET_LISTEN_E] = {FILLER_REF(sys_autofill), 2, APT_SOCK, {{0}, {1} } },
+	[PPME_SOCKET_LISTEN_E] = {FILLER_REF(sys_listen_e)},
 	[PPME_SOCKET_LISTEN_X] = {FILLER_REF(sys_single_x)},
 	[PPME_SOCKET_SEND_E] = {FILLER_REF(sys_send_e)},
 	[PPME_SOCKET_SEND_X] = {FILLER_REF(sys_send_x)},
@@ -144,15 +147,15 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_INOTIFY_INIT_E] = {FILLER_REF(sys_inotify_init_e)},
 	[PPME_SYSCALL_INOTIFY_INIT_X] = {FILLER_REF(sys_single_x)},
 	[PPME_SYSCALL_GETRLIMIT_E] = {FILLER_REF(sys_getrlimit_setrlimit_e)},
-	[PPME_SYSCALL_GETRLIMIT_X] = {FILLER_REF(sys_getrlimit_setrlrimit_x)},
+	[PPME_SYSCALL_GETRLIMIT_X] = {FILLER_REF(sys_getrlimit_x)},
 	[PPME_SYSCALL_SETRLIMIT_E] = {FILLER_REF(sys_getrlimit_setrlimit_e)},
-	[PPME_SYSCALL_SETRLIMIT_X] = {FILLER_REF(sys_getrlimit_setrlrimit_x)},
+	[PPME_SYSCALL_SETRLIMIT_X] = {FILLER_REF(sys_setrlimit_x)},
 	[PPME_SYSCALL_PRLIMIT_E] = {FILLER_REF(sys_prlimit_e)},
 	[PPME_SYSCALL_PRLIMIT_X] = {FILLER_REF(sys_prlimit_x)},
 	[PPME_DROP_E] = {FILLER_REF(sched_drop)},
 	[PPME_DROP_X] = {FILLER_REF(sched_drop)},
 	[PPME_SYSCALL_FCNTL_E] = {FILLER_REF(sys_fcntl_e)},
-	[PPME_SYSCALL_FCNTL_X] = {FILLER_REF(sys_single_x)},
+	[PPME_SYSCALL_FCNTL_X] = {FILLER_REF(sys_fcntl_x)},
 #ifdef CAPTURE_CONTEXT_SWITCHES
 	[PPME_SCHEDSWITCH_6_E] = {FILLER_REF(sched_switch_e)},
 #endif
@@ -254,7 +257,7 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 #endif
 	[PPME_SYSCALL_BPF_2_E] = {FILLER_REF(sys_bpf_e)},
 	[PPME_SYSCALL_BPF_2_X] = {FILLER_REF(sys_bpf_x)},
-	[PPME_SYSCALL_SECCOMP_E] = {FILLER_REF(sys_autofill), 1, APT_REG, {{0}, {1} } },
+	[PPME_SYSCALL_SECCOMP_E] = {FILLER_REF(sys_autofill), 2, APT_REG, {{0}, {1} } },
 	[PPME_SYSCALL_SECCOMP_X] = {FILLER_REF(sys_autofill), 1, APT_REG, {{AF_ID_RETVAL} } },
 	[PPME_SYSCALL_UNLINK_2_E] = {FILLER_REF(sys_empty)},
 	[PPME_SYSCALL_UNLINK_2_X] = {FILLER_REF(sys_autofill), 2, APT_REG, {{AF_ID_RETVAL}, {0} } },
@@ -338,4 +341,27 @@ const struct ppm_event_entry g_ppm_events[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_SIGNALFD4_X] = {FILLER_REF(sys_signalfd4_x)},
 	[PPME_SYSCALL_PRCTL_E] = {FILLER_REF(sys_empty)},
 	[PPME_SYSCALL_PRCTL_X] = {FILLER_REF(sys_prctl_x)},
+	[PPME_SYSCALL_MEMFD_CREATE_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_MEMFD_CREATE_X] = {FILLER_REF(sys_memfd_create_x)},
+	[PPME_SYSCALL_PIDFD_GETFD_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_PIDFD_GETFD_X] = {FILLER_REF(sys_pidfd_getfd_x)},
+	[PPME_SYSCALL_PIDFD_OPEN_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_PIDFD_OPEN_X] = {FILLER_REF(sys_pidfd_open_x)},
+	[PPME_SYSCALL_INIT_MODULE_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_INIT_MODULE_X] = {FILLER_REF(sys_init_module_x)},
+	[PPME_SYSCALL_FINIT_MODULE_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_FINIT_MODULE_X] = {FILLER_REF(sys_finit_module_x)},
+	[PPME_SYSCALL_MKNOD_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_MKNOD_X] = {FILLER_REF(sys_mknod_x)},
+	[PPME_SYSCALL_MKNODAT_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_MKNODAT_X] = {FILLER_REF(sys_mknodat_x)},
+	[PPME_SYSCALL_NEWFSTATAT_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_NEWFSTATAT_X] = {FILLER_REF(sys_newfstatat_x)},
+	[PPME_SYSCALL_PROCESS_VM_READV_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_PROCESS_VM_READV_X] = {FILLER_REF(sys_process_vm_readv_x)},
+	[PPME_SYSCALL_PROCESS_VM_WRITEV_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_PROCESS_VM_WRITEV_X] = {FILLER_REF(sys_process_vm_writev_x)},
+	[PPME_SYSCALL_DELETE_MODULE_E] = {FILLER_REF(sys_empty)},
+	[PPME_SYSCALL_DELETE_MODULE_X] = {FILLER_REF(sys_delete_module_x)},
 };
+#pragma GCC diagnostic pop

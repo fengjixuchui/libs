@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -14,17 +15,3 @@ limitations under the License.
 #pragma once
 
 #define NODRIVER_ENGINE "nodriver"
-
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-	struct scap_nodriver_engine_params
-	{
-		bool full_proc_scan; //< run a full /proc scan instead of the normal reduced one (no threads, no sockets)
-	};
-
-#ifdef __cplusplus
-};
-#endif

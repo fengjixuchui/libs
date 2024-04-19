@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -21,12 +22,14 @@ limitations under the License.
 extern "C"
 {
 #endif
+	#include <libscap/linux/scap_linux_platform.h>
 
 	struct scap_kmod_engine_params
 	{
 		unsigned long buffer_bytes_dim; ///< Dimension of a single per-CPU buffer in bytes. Please note: this buffer will be mapped twice in the process virtual memory, so pay attention to its size.
 	};
 
+	extern const struct scap_linux_vtable scap_kmod_linux_vtable;
 #ifdef __cplusplus
 };
 #endif

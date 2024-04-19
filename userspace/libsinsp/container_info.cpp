@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +18,9 @@ limitations under the License.
 
 #include <utility>
 
-#include "container_info.h"
-#include "sinsp.h"
-#include "sinsp_int.h"
+#include <libsinsp/container_info.h>
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
 
 std::vector<std::string> sinsp_container_info::container_health_probe::probe_type_names = {
 	"None",
@@ -79,7 +80,7 @@ void sinsp_container_info::container_health_probe::parse_health_probes(const Jso
 						}
 					}
 				}
-				g_logger.format(sinsp_logger::SEV_DEBUG,
+				libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 						"add_health_probes: adding %s %s %d",
 						probe_type_names[i].c_str(),
 						probe_exe.c_str(),
@@ -149,7 +150,7 @@ const sinsp_container_info::container_mount_info *sinsp_container_info::mount_by
 
 std::shared_ptr<sinsp_threadinfo> sinsp_container_info::get_tinfo(sinsp* inspector) const
 {
-	std::shared_ptr<sinsp_threadinfo> tinfo(inspector->build_threadinfo());
+	std::shared_ptr<sinsp_threadinfo> tinfo(inspector->build_threadinfo().release());
 	tinfo->m_tid = -1;
 	tinfo->m_pid = -1;
 	tinfo->m_vtid = -2;
@@ -163,12 +164,12 @@ std::shared_ptr<sinsp_threadinfo> sinsp_container_info::get_tinfo(sinsp* inspect
 
 sinsp_container_info::container_health_probe::probe_type sinsp_container_info::match_health_probe(sinsp_threadinfo *tinfo) const
 {
-	g_logger.format(sinsp_logger::SEV_DEBUG,
+	libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 			"match_health_probe (%s): %u health probes to consider",
 			m_id.c_str(), m_health_probes.size());
 
 	auto pred = [&] (const container_health_probe &p) {
-                g_logger.format(sinsp_logger::SEV_DEBUG,
+                libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 				"match_health_probe (%s): Matching tinfo %s %d against %s %d",
 				m_id.c_str(),
 				tinfo->m_exe.c_str(), tinfo->m_args.size(),

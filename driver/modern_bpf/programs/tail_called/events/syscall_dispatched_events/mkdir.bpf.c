@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -16,17 +17,17 @@ int BPF_PROG(mkdir_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, MKDIR_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, MKDIR_E_SIZE, PPME_SYSCALL_MKDIR_2_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_MKDIR_2_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: mode (type: PT_UINT32) */
-	u32 mode = (u32)extract__syscall_argument(regs, 1);
+	uint32_t mode = (uint32_t)extract__syscall_argument(regs, 1);
 	ringbuf__store_u32(&ringbuf, mode);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

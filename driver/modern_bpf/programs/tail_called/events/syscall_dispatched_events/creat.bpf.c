@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -72,7 +73,7 @@ int BPF_PROG(creat_x,
 	auxmap__store_u32_param(auxmap, open_modes_to_scap(O_CREAT, mode));
 
 	dev_t dev = 0;
-	u64 ino = 0;
+	uint64_t ino = 0;
 
 	if(ret > 0)
 	{

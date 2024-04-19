@@ -12,15 +12,15 @@
 #include "network_utils.h"
 #include <arpa/inet.h>
 #include <sys/un.h>
-#include <scap.h>
+#include <libscap/scap.h>
 
 #define CURRENT_PID -1
 #define CURRENT_EVENT_TYPE -1
 
 extern "C"
 {
-#include <ppm_events_public.h>
-#include <feature_gates.h>
+#include <driver/ppm_events_public.h>
+#include <driver/feature_gates.h>
 }
 
 struct param
@@ -69,6 +69,19 @@ enum direction
  */
 #define TEST_EXECUTABLE_NAME "drivers_test"
 
+/*
+ * Macro that wraps internal _assert_syscall_state,
+ * dealing with ENOSYS syscalls, ie: syscalls that are defined but unimplemented,
+ * skipping the test.
+ */
+#define assert_syscall_state(syscall_state, syscall_name, ...) \
+        do { \
+		errno = 0; \
+		_assert_syscall_state(syscall_state, syscall_name, __VA_ARGS__); \
+                if(errno == ENOSYS) \
+			GTEST_SKIP() << "Syscall " << syscall_name << " not implemented" << std::endl; \
+	} while(0)
+
 /////////////////////////////////
 // SYSCALL RESULT ASSERTIONS
 /////////////////////////////////
@@ -80,13 +93,16 @@ enum direction
  *
  * When you use this method you must check what is the syscall return value!
  *
+ * PLEASE use the assert_syscall_state macro instead, that automatically
+ * deals with unimplemented syscalls errors.
+ *
  * @param syscall_state it could be `SYSCALL_FAILURE` or `SYSCALL_SUCCESS`
  * @param syscall_name the name of the syscall to assert.
  * @param syscall_rc the return code of the syscall to assert.
  * @param op the operation we want to perform in the assertion.
  * @param expected_rc the return code we expect.
  */
-void assert_syscall_state(int syscall_state, const char* syscall_name, long syscall_rc, enum assertion_operators op = EQUAL, long expected_rc = -1);
+void _assert_syscall_state(int syscall_state, const char* syscall_name, long syscall_rc, enum assertion_operators op = EQUAL, long expected_rc = -1);
 
 class event_test
 {
@@ -138,6 +154,12 @@ public:
 	~event_test();
 
 	/**
+	 * @brief Set a custom event type after opening the event_test
+	 * object
+	 */
+	void set_event_type(ppm_event_code evt_type);
+
+	/**
 	 * @brief Tracepoints can start to catch events.
 	 *
 	 */
@@ -181,14 +203,14 @@ public:
 
 	/**
 	 * @brief Set stasd port
-	 * 
+	 *
 	 * @param port new statsd port
 	 */
 	void set_statsd_port(uint16_t port);
 
 	/**
 	 * @brief Set a range of network ports as interesting
-	 * 
+	 *
 	 * @param start first port of the range
 	 * @param end last port of the range
 	 */
@@ -305,6 +327,8 @@ public:
 	void connect_ipv4_client_to_server(int32_t* client_socket, struct sockaddr_in* client_sockaddr, int32_t* server_socket, struct sockaddr_in* server_sockaddr, int32_t client_port = IPV4_PORT_CLIENT, int32_t server_port = IPV4_PORT_SERVER);
 	void connect_ipv6_client_to_server(int32_t* client_socket, struct sockaddr_in6* client_sockaddr, int32_t* server_socket, struct sockaddr_in6* server_sockaddr);
 	void connect_unix_client_to_server(int32_t* client_socket, struct sockaddr_un* client_sockaddr, int32_t* server_socket, struct sockaddr_un* server_sockaddr);
+
+	void connect_ipv4_udp_client_to_server(int32_t* client_socket, struct sockaddr_in* client_sockaddr, int32_t* server_socket, struct sockaddr_in* server_sockaddr, int32_t client_port = IPV4_PORT_CLIENT, int32_t server_port = IPV4_PORT_SERVER);
 
 	/////////////////////////////////
 	// GENERIC EVENT ASSERTIONS

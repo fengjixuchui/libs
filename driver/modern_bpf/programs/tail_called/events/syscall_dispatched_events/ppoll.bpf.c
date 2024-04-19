@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -26,7 +27,7 @@ int BPF_PROG(ppoll_e,
 
 	/* Get the `fds_pointer` and the number of `fds` from the syscall arguments */
 	unsigned long fds_pointer = extract__syscall_argument(regs, 0);
-	u32 nfds = (u32)extract__syscall_argument(regs, 1);
+	uint32_t nfds = (uint32_t)extract__syscall_argument(regs, 1);
 
 	/* Parameter 1: fds (type: PT_FDLIST) */
 	/* We are in the enter event so we get the requested events, the returned events are only available
@@ -35,19 +36,19 @@ int BPF_PROG(ppoll_e,
 	auxmap__store_fdlist_param(auxmap, fds_pointer, nfds, REQUESTED_EVENTS);
 
 	/* Parameter 2: timeout (type: PT_RELTIME) */
-	u64 nanosec = 0;
+	uint64_t nanosec = 0;
 	unsigned long ts_pointer = extract__syscall_argument(regs, 2);
 	if(bpf_core_type_exists(struct __kernel_timespec))
 	{
 		struct __kernel_timespec ts = {0};
 		bpf_probe_read_user(&ts, bpf_core_type_size(struct __kernel_timespec), (void *)ts_pointer);
-		nanosec = ((u64)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
+		nanosec = ((uint64_t)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
 	}
 	else
 	{
 		struct modern_bpf__kernel_timespec ts = {0};
 		bpf_probe_read_user(&ts, sizeof(ts), (void *)ts_pointer);
-		nanosec = ((u64)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
+		nanosec = ((uint64_t)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
 	}
 	auxmap__store_u64_param(auxmap, nanosec);
 
@@ -57,11 +58,11 @@ int BPF_PROG(ppoll_e,
 	if(bpf_probe_read_user(&sigmask, sizeof(sigmask), (void *)sigmask_pointer))
 	{
 		/* In case of invalid pointer, return 0 */
-		auxmap__store_u32_param(auxmap, (u32)0);
+		auxmap__store_u32_param(auxmap, (uint32_t)0);
 	}
 	else
 	{
-		auxmap__store_u32_param(auxmap, (u32)sigmask[0]);
+		auxmap__store_u32_param(auxmap, (uint32_t)sigmask[0]);
 	}
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
@@ -97,7 +98,7 @@ int BPF_PROG(ppoll_x,
 
 	/* Get the `fds_pointer` and the number of `fds` from the syscall arguments */
 	unsigned long fds_pointer = extract__syscall_argument(regs, 0);
-	u32 nfds = (u32)extract__syscall_argument(regs, 1);
+	uint32_t nfds = (uint32_t)extract__syscall_argument(regs, 1);
 
 	/* Parameter 2: fds (type: PT_FDLIST) */
 	auxmap__store_fdlist_param(auxmap, fds_pointer, nfds, RETURNED_EVENTS);

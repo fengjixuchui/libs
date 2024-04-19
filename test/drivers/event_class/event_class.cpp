@@ -1,4 +1,4 @@
-#include "strlcpy.h"
+#include <libscap/strl.h>
 #include "event_class.h"
 #include <time.h>
 
@@ -22,7 +22,7 @@ static_assert(sizeof(cgroup_prefix_array) / sizeof(*cgroup_prefix_array) == CGRO
 #define VALUE_NOT_CORRECT ">>>>> value of the param is not correct. Param id = "
 #define VALUE_NOT_ZERO ">>>>> value of the param must not be zero. Param id = "
 
-extern const struct syscall_evt_pair g_syscall_table[SYSCALL_TABLE_SIZE];
+extern const syscall_evt_pair g_syscall_table[SYSCALL_TABLE_SIZE];
 
 /////////////////////////////////
 // RETRIEVE EVENT CLASS
@@ -47,9 +47,15 @@ std::unique_ptr<event_test> get_syscall_event_test()
 // SYSCALL RESULT ASSERTIONS
 /////////////////////////////////
 
-void assert_syscall_state(int syscall_state, const char* syscall_name, long syscall_rc, enum assertion_operators op, long expected_rc)
+void _assert_syscall_state(int syscall_state, const char* syscall_name, long syscall_rc, assertion_operators op, long expected_rc)
 {
 	bool match = false;
+
+	if (errno == ENOSYS)
+	{
+		// it is managed upward by assert_syscall_state macro.
+		return;
+	}
 
 	switch(op)
 	{
@@ -167,6 +173,11 @@ event_test::event_test():
 	}
 }
 
+void event_test::set_event_type(ppm_event_code evt_type)
+{
+	m_event_type = evt_type;
+}
+
 void event_test::enable_capture()
 {
 	for(int ppm_sc = 0; ppm_sc < PPM_SC_MAX; ppm_sc++)
@@ -235,24 +246,26 @@ void event_test::disable_capture()
 void event_test::clear_ring_buffers()
 {
 	uint16_t cpu_id = 0;
+	uint32_t flags = 0;
 	/* First timeout means that all the buffers are empty. If the capture is not
 	 * stopped it is possible that we will never receive a `SCAP_TIMEOUT`.
 	 */
-	while(scap_next(s_scap_handle, (scap_evt**)&m_event_header, &cpu_id) != SCAP_TIMEOUT)
+	while(scap_next(s_scap_handle, (scap_evt**)&m_event_header, &cpu_id, &flags) != SCAP_TIMEOUT)
 	{
 	}
 }
 
-struct ppm_evt_hdr* event_test::get_event_from_ringbuffer(uint16_t* cpu_id)
+ppm_evt_hdr* event_test::get_event_from_ringbuffer(uint16_t* cpu_id)
 {
-	struct ppm_evt_hdr* hdr = NULL;
+	ppm_evt_hdr* hdr = NULL;
 	uint16_t attempts = 0;
 	int32_t res = 0;
+	uint32_t flags = 0;
 
 	/* Try 2 times just to be sure that all the buffers are empty. */
 	while(attempts <= 1)
 	{
-		res = scap_next(s_scap_handle, (scap_evt**)&hdr, cpu_id);
+		res = scap_next(s_scap_handle, (scap_evt**)&hdr, cpu_id, &flags);
 		if(res == SCAP_SUCCESS && hdr != NULL)
 		{
 			break;
@@ -269,9 +282,9 @@ struct ppm_evt_hdr* event_test::get_event_from_ringbuffer(uint16_t* cpu_id)
 void event_test::parse_event()
 {
 	uint8_t nparams = m_event_header->nparams;
-	uint16_t* lens16 = (uint16_t*)((char*)m_event_header + sizeof(struct ppm_evt_hdr));
+	uint16_t* lens16 = (uint16_t*)((char*)m_event_header + sizeof(ppm_evt_hdr));
 	char* valptr = (char*)lens16 + nparams * sizeof(uint16_t);
-	uint32_t total_len = sizeof(struct ppm_evt_hdr) + nparams * sizeof(uint16_t);
+	uint32_t total_len = sizeof(ppm_evt_hdr) + nparams * sizeof(uint16_t);
 	struct param par;
 
 	/* Insert a dummy param just to use index starting from 1 insted of 0. */
@@ -314,7 +327,7 @@ void event_test::server_reuse_address_port(int32_t socketfd)
 	assert_syscall_state(SYSCALL_SUCCESS, "setsockopt (server port)", syscall(__NR_setsockopt, socketfd, SOL_SOCKET, SO_REUSEPORT, &option_value, sizeof(option_value)), NOT_EQUAL, -1);
 }
 
-void event_test::client_fill_sockaddr_in(struct sockaddr_in* sockaddr, int32_t ipv4_port, const char* ipv4_string)
+void event_test::client_fill_sockaddr_in(sockaddr_in* sockaddr, int32_t ipv4_port, const char* ipv4_string)
 {
 	memset(sockaddr, 0, sizeof(*sockaddr));
 	sockaddr->sin_family = AF_INET;
@@ -322,7 +335,7 @@ void event_test::client_fill_sockaddr_in(struct sockaddr_in* sockaddr, int32_t i
 	assert_syscall_state(SYSCALL_SUCCESS, "inet_pton (client)", inet_pton(AF_INET, ipv4_string, &(sockaddr->sin_addr)), NOT_EQUAL, -1);
 }
 
-void event_test::server_fill_sockaddr_in(struct sockaddr_in* sockaddr, int32_t ipv4_port, const char* ipv4_string)
+void event_test::server_fill_sockaddr_in(sockaddr_in* sockaddr, int32_t ipv4_port, const char* ipv4_string)
 {
 	memset(sockaddr, 0, sizeof(*sockaddr));
 	sockaddr->sin_family = AF_INET;
@@ -330,7 +343,7 @@ void event_test::server_fill_sockaddr_in(struct sockaddr_in* sockaddr, int32_t i
 	assert_syscall_state(SYSCALL_SUCCESS, "inet_pton (server)", inet_pton(AF_INET, ipv4_string, &(sockaddr->sin_addr)), NOT_EQUAL, -1);
 }
 
-void event_test::client_fill_sockaddr_in6(struct sockaddr_in6* sockaddr, int32_t ipv6_port, const char* ipv6_string)
+void event_test::client_fill_sockaddr_in6(sockaddr_in6* sockaddr, int32_t ipv6_port, const char* ipv6_string)
 {
 	memset(sockaddr, 0, sizeof(*sockaddr));
 	sockaddr->sin6_family = AF_INET6;
@@ -338,7 +351,7 @@ void event_test::client_fill_sockaddr_in6(struct sockaddr_in6* sockaddr, int32_t
 	assert_syscall_state(SYSCALL_SUCCESS, "inet_pton (client)", inet_pton(AF_INET6, ipv6_string, &(sockaddr->sin6_addr)), NOT_EQUAL, -1);
 }
 
-void event_test::server_fill_sockaddr_in6(struct sockaddr_in6* sockaddr, int32_t ipv6_port, const char* ipv6_string)
+void event_test::server_fill_sockaddr_in6(sockaddr_in6* sockaddr, int32_t ipv6_port, const char* ipv6_string)
 {
 	memset(sockaddr, 0, sizeof(*sockaddr));
 	sockaddr->sin6_family = AF_INET6;
@@ -346,7 +359,7 @@ void event_test::server_fill_sockaddr_in6(struct sockaddr_in6* sockaddr, int32_t
 	assert_syscall_state(SYSCALL_SUCCESS, "inet_pton (server)", inet_pton(AF_INET6, ipv6_string, &(sockaddr->sin6_addr)), NOT_EQUAL, -1);
 }
 
-void event_test::client_fill_sockaddr_un(struct sockaddr_un* sockaddr, const char* unix_path)
+void event_test::client_fill_sockaddr_un(sockaddr_un* sockaddr, const char* unix_path)
 {
 	memset(sockaddr, 0, sizeof(*sockaddr));
 	sockaddr->sun_family = AF_UNIX;
@@ -354,7 +367,7 @@ void event_test::client_fill_sockaddr_un(struct sockaddr_un* sockaddr, const cha
 	strlcpy(sockaddr->sun_path, unix_path, MAX_SUN_PATH);
 }
 
-void event_test::server_fill_sockaddr_un(struct sockaddr_un* sockaddr, const char* unix_path)
+void event_test::server_fill_sockaddr_un(sockaddr_un* sockaddr, const char* unix_path)
 {
 	memset(sockaddr, 0, sizeof(*sockaddr));
 	sockaddr->sun_family = AF_UNIX;
@@ -362,7 +375,7 @@ void event_test::server_fill_sockaddr_un(struct sockaddr_un* sockaddr, const cha
 	strlcpy(sockaddr->sun_path, unix_path, MAX_SUN_PATH);
 }
 
-void event_test::connect_ipv4_client_to_server(int32_t* client_socket, struct sockaddr_in* client_sockaddr, int32_t* server_socket, struct sockaddr_in* server_sockaddr, int32_t port_client, int32_t port_server)
+void event_test::connect_ipv4_client_to_server(int32_t* client_socket, sockaddr_in* client_sockaddr, int32_t* server_socket, sockaddr_in* server_sockaddr, int32_t port_client, int32_t port_server)
 {
 	/* Create the server socket. */
 	*server_socket = syscall(__NR_socket, AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
@@ -373,7 +386,7 @@ void event_test::connect_ipv4_client_to_server(int32_t* client_socket, struct so
 	server_fill_sockaddr_in(server_sockaddr, port_server);
 
 	/* Now we bind the server socket with the server address. */
-	assert_syscall_state(SYSCALL_SUCCESS, "bind (server)", syscall(__NR_bind, *server_socket, (struct sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (server)", syscall(__NR_bind, *server_socket, (sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
 	assert_syscall_state(SYSCALL_SUCCESS, "listen (server)", syscall(__NR_listen, *server_socket, QUEUE_LENGTH), NOT_EQUAL, -1);
 
 	/* The server now is ready, we need to create at least one connection from the client. */
@@ -386,11 +399,37 @@ void event_test::connect_ipv4_client_to_server(int32_t* client_socket, struct so
 	client_fill_sockaddr_in(client_sockaddr, port_client);
 
 	/* We need to bind the client socket with an address otherwise we cannot assert against it. */
-	assert_syscall_state(SYSCALL_SUCCESS, "bind (client)", syscall(__NR_bind, *client_socket, (struct sockaddr*)client_sockaddr, sizeof(*client_sockaddr)), NOT_EQUAL, -1);
-	assert_syscall_state(SYSCALL_SUCCESS, "connect (client)", syscall(__NR_connect, *client_socket, (struct sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (client)", syscall(__NR_bind, *client_socket, (sockaddr*)client_sockaddr, sizeof(*client_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "connect (client)", syscall(__NR_connect, *client_socket, (sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
 }
 
-void event_test::connect_ipv6_client_to_server(int32_t* client_socket, struct sockaddr_in6* client_sockaddr, int32_t* server_socket, struct sockaddr_in6* server_sockaddr)
+void event_test::connect_ipv4_udp_client_to_server(int32_t* client_socket, sockaddr_in* client_sockaddr, int32_t* server_socket, sockaddr_in* server_sockaddr, int32_t port_client, int32_t port_server)
+{
+	/* Create the server socket. */
+	*server_socket = syscall(__NR_socket, AF_INET, SOCK_DGRAM, 0);
+	assert_syscall_state(SYSCALL_SUCCESS, "socket (server)", *server_socket, NOT_EQUAL, -1);
+	server_reuse_address_port(*server_socket);
+
+	memset(server_sockaddr, 0, sizeof(*server_sockaddr));
+	server_fill_sockaddr_in(server_sockaddr, port_server);
+
+	/* Now we bind the server socket with the server address. */
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (server)", syscall(__NR_bind, *server_socket, (sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
+
+	/* The server now is ready, we need to create at least one connection from the client. */
+
+	*client_socket = syscall(__NR_socket, AF_INET, SOCK_DGRAM, 0);
+	assert_syscall_state(SYSCALL_SUCCESS, "socket (client)", *client_socket, NOT_EQUAL, -1);
+	client_reuse_address_port(*client_socket);
+
+	memset(client_sockaddr, 0, sizeof(*client_sockaddr));
+	client_fill_sockaddr_in(client_sockaddr, port_client);
+
+	/* We need to bind the client socket with an address otherwise we cannot assert against it. */
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (client)", syscall(__NR_bind, *client_socket, (sockaddr*)client_sockaddr, sizeof(*client_sockaddr)), NOT_EQUAL, -1);
+}
+
+void event_test::connect_ipv6_client_to_server(int32_t* client_socket, sockaddr_in6* client_sockaddr, int32_t* server_socket, sockaddr_in6* server_sockaddr)
 {
 	/* Create the server socket. */
 	*server_socket = syscall(__NR_socket, AF_INET6, SOCK_STREAM | SOCK_NONBLOCK, 0);
@@ -401,7 +440,7 @@ void event_test::connect_ipv6_client_to_server(int32_t* client_socket, struct so
 	server_fill_sockaddr_in6(server_sockaddr);
 
 	/* Now we bind the server socket with the server address. */
-	assert_syscall_state(SYSCALL_SUCCESS, "bind (server)", syscall(__NR_bind, *server_socket, (struct sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (server)", syscall(__NR_bind, *server_socket, (sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
 	assert_syscall_state(SYSCALL_SUCCESS, "listen (server)", syscall(__NR_listen, *server_socket, QUEUE_LENGTH), NOT_EQUAL, -1);
 
 	/* The server now is ready, we need to create at least one connection from the client. */
@@ -414,11 +453,11 @@ void event_test::connect_ipv6_client_to_server(int32_t* client_socket, struct so
 	client_fill_sockaddr_in6(client_sockaddr);
 
 	/* We need to bind the client socket with an address otherwise we cannot assert against it. */
-	assert_syscall_state(SYSCALL_SUCCESS, "bind (client)", syscall(__NR_bind, *client_socket, (struct sockaddr*)client_sockaddr, sizeof(*client_sockaddr)), NOT_EQUAL, -1);
-	assert_syscall_state(SYSCALL_SUCCESS, "connect (client)", syscall(__NR_connect, *client_socket, (struct sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (client)", syscall(__NR_bind, *client_socket, (sockaddr*)client_sockaddr, sizeof(*client_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "connect (client)", syscall(__NR_connect, *client_socket, (sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
 }
 
-void event_test::connect_unix_client_to_server(int32_t* client_socket, struct sockaddr_un* client_sockaddr, int32_t* server_socket, struct sockaddr_un* server_sockaddr)
+void event_test::connect_unix_client_to_server(int32_t* client_socket, sockaddr_un* client_sockaddr, int32_t* server_socket, sockaddr_un* server_sockaddr)
 {
 	/* Create the server socket. */
 	*server_socket = syscall(__NR_socket, AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
@@ -428,7 +467,7 @@ void event_test::connect_unix_client_to_server(int32_t* client_socket, struct so
 	server_fill_sockaddr_un(server_sockaddr);
 
 	/* Now we bind the server socket with the server address. */
-	assert_syscall_state(SYSCALL_SUCCESS, "bind (server)", syscall(__NR_bind, *server_socket, (struct sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (server)", syscall(__NR_bind, *server_socket, (sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
 	assert_syscall_state(SYSCALL_SUCCESS, "listen (server)", syscall(__NR_listen, *server_socket, QUEUE_LENGTH), NOT_EQUAL, -1);
 
 	/* The server now is ready, we need to create at least one connection from the client. */
@@ -440,8 +479,8 @@ void event_test::connect_unix_client_to_server(int32_t* client_socket, struct so
 	client_fill_sockaddr_un(client_sockaddr);
 
 	/* We need to bind the client socket with an address otherwise we cannot assert against it. */
-	assert_syscall_state(SYSCALL_SUCCESS, "bind (client)", syscall(__NR_bind, *client_socket, (struct sockaddr*)client_sockaddr, sizeof(*client_sockaddr)), NOT_EQUAL, -1);
-	assert_syscall_state(SYSCALL_SUCCESS, "connect (client)", syscall(__NR_connect, *client_socket, (struct sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "bind (client)", syscall(__NR_bind, *client_socket, (sockaddr*)client_sockaddr, sizeof(*client_sockaddr)), NOT_EQUAL, -1);
+	assert_syscall_state(SYSCALL_SUCCESS, "connect (client)", syscall(__NR_connect, *client_socket, (sockaddr*)server_sockaddr, sizeof(*server_sockaddr)), NOT_EQUAL, -1);
 }
 
 /////////////////////////////////
@@ -494,7 +533,7 @@ void event_test::assert_only_param_len(int param_num, uint16_t expected_size)
 }
 
 template<typename T>
-void event_test::assert_numeric_param(int param_num, T param, enum assertion_operators op)
+void event_test::assert_numeric_param(int param_num, T param, assertion_operators op)
 {
 	assert_param_boundaries(param_num);
 	assert_param_len(sizeof(T));
@@ -523,14 +562,14 @@ void event_test::assert_numeric_param(int param_num, T param, enum assertion_ope
 	}
 }
 
-template void event_test::assert_numeric_param<uint8_t>(int, uint8_t, enum assertion_operators);
-template void event_test::assert_numeric_param<uint16_t>(int, uint16_t, enum assertion_operators);
-template void event_test::assert_numeric_param<uint32_t>(int, uint32_t, enum assertion_operators);
-template void event_test::assert_numeric_param<uint64_t>(int, uint64_t, enum assertion_operators);
-template void event_test::assert_numeric_param<int8_t>(int, int8_t, enum assertion_operators);
-template void event_test::assert_numeric_param<int16_t>(int, int16_t, enum assertion_operators);
-template void event_test::assert_numeric_param<int32_t>(int, int32_t, enum assertion_operators);
-template void event_test::assert_numeric_param<int64_t>(int, int64_t, enum assertion_operators);
+template void event_test::assert_numeric_param<uint8_t>(int, uint8_t, assertion_operators);
+template void event_test::assert_numeric_param<uint16_t>(int, uint16_t, assertion_operators);
+template void event_test::assert_numeric_param<uint32_t>(int, uint32_t, assertion_operators);
+template void event_test::assert_numeric_param<uint64_t>(int, uint64_t, assertion_operators);
+template void event_test::assert_numeric_param<int8_t>(int, int8_t, assertion_operators);
+template void event_test::assert_numeric_param<int16_t>(int, int16_t, assertion_operators);
+template void event_test::assert_numeric_param<int32_t>(int, int32_t, assertion_operators);
+template void event_test::assert_numeric_param<int64_t>(int, int64_t, assertion_operators);
 
 void event_test::assert_charbuf_param(int param_num, const char* param)
 {
@@ -839,7 +878,7 @@ void event_test::assert_address_family(uint8_t desired_family, int starting_inde
 	ASSERT_EQ(family, desired_family) << VALUE_NOT_CORRECT << m_current_param << std::endl;
 }
 
-void event_test::assert_ipv4_string(const char* desired_ipv4, int starting_index, enum direction dir)
+void event_test::assert_ipv4_string(const char* desired_ipv4, int starting_index, direction dir)
 {
 	char ipv4_string[ADDRESS_LENGTH];
 	if(inet_ntop(AF_INET, (uint8_t*)(m_event_params[m_current_param].valptr + starting_index), ipv4_string, ADDRESS_LENGTH) == NULL)
@@ -857,7 +896,7 @@ void event_test::assert_ipv4_string(const char* desired_ipv4, int starting_index
 	}
 }
 
-void event_test::assert_port_string(const char* desired_port, int starting_index, enum direction dir)
+void event_test::assert_port_string(const char* desired_port, int starting_index, direction dir)
 {
 	uint16_t port = *(uint16_t*)(m_event_params[m_current_param].valptr + starting_index);
 	const char* port_string = std::to_string(port).c_str();
@@ -872,7 +911,7 @@ void event_test::assert_port_string(const char* desired_port, int starting_index
 	}
 }
 
-void event_test::assert_ipv6_string(const char* desired_ipv6, int starting_index, enum direction dir)
+void event_test::assert_ipv6_string(const char* desired_ipv6, int starting_index, direction dir)
 {
 	char ipv6_string[ADDRESS_LENGTH];
 	if(inet_ntop(AF_INET6, (uint32_t*)(m_event_params[m_current_param].valptr + starting_index), ipv6_string, ADDRESS_LENGTH) == NULL)

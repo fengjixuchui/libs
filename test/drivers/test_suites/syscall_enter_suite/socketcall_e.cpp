@@ -26,7 +26,7 @@ TEST(SyscallEnter, socketcall_socketE)
 	/* Here we need to call the `socket` from a child because the main process throws a `socket`
 	 * syscall to calibrate the socket file options if we are using the bpf probe.
 	 */
-	struct clone_args cl_args = {0};
+	clone_args cl_args = {0};
 	cl_args.flags = CLONE_FILES;
 	cl_args.exit_signal = SIGCHLD;
 	pid_t ret_pid = syscall(__NR_clone3, &cl_args, sizeof(cl_args));
@@ -136,7 +136,7 @@ TEST(SyscallEnter, socketcall_connectE)
 	/*=============================== TRIGGER SYSCALL ===========================*/
 
 	int32_t mock_fd = -1;
-	struct sockaddr_in server_addr;
+	sockaddr_in server_addr;
 	evt_test->server_fill_sockaddr_in(&server_addr);
 	unsigned long args[3] = {0};
 	args[0] = mock_fd;
@@ -327,17 +327,25 @@ TEST(SyscallEnter, socketcall_acceptE)
 {
 #ifdef __s390x__
 	auto evt_test = get_syscall_event_test(__NR_accept4, ENTER_EVENT);
-	if(evt_test->is_kmod_engine())
-		GTEST_SKIP() << "[acceptE] kmod socketcall implementation is event based (rather syscall) " << std::endl;
+	/* The kmod/bpf can correctly handle accept also on s390x */
+	if(evt_test->is_kmod_engine() || evt_test->is_bpf_engine())
+	{
+		/* we cannot set `__NR_accept` explicitly since it is not defined on s390x
+		 * we activate all syscalls.
+		 */
+		evt_test.reset(get_syscall_event_test().release());
+		evt_test->set_event_type(PPME_SOCKET_ACCEPT_5_E);
+	}
 #else
 	auto evt_test = get_syscall_event_test(__NR_accept, ENTER_EVENT);
 #endif
+
 	evt_test->enable_capture();
 
 	/*=============================== TRIGGER SYSCALL  ===========================*/
 
 	int32_t mock_fd = -1;
-	struct sockaddr *addr = NULL;
+	sockaddr* addr = NULL;
 	socklen_t *addrlen = NULL;
 
 	unsigned long args[3] = {0};
@@ -362,17 +370,21 @@ TEST(SyscallEnter, socketcall_acceptE)
 	evt_test->assert_header();
 
 #ifdef __s390x__
-	/* socketcall uses accept4 event for SYS_ACCEPT */
+	if(evt_test->is_modern_bpf_engine())
+	{
+		/* socketcall uses accept4 event for SYS_ACCEPT for modern BPF */
 
-	/*=============================== ASSERT PARAMETERS  ===========================*/
+		/*=============================== ASSERT PARAMETERS  ===========================*/
 
-	/* Parameter 1: flags (type: PT_FLAGS32) */
-	/* Right now `flags` are not supported so we will catch always `0` */
-	evt_test->assert_numeric_param(1, (uint32_t)0);
+		/* Parameter 1: flags (type: PT_FLAGS32) */
+		/* Right now `flags` are not supported so we will catch always `0` */
+		evt_test->assert_numeric_param(1, (uint32_t)0);
 
-	/*=============================== ASSERT PARAMETERS  ===========================*/
+		/*=============================== ASSERT PARAMETERS  ===========================*/
 
-	evt_test->assert_num_params_pushed(1);
+		evt_test->assert_num_params_pushed(1);
+		SUCCEED();
+	}
 #else
 	/*=============================== ASSERT PARAMETERS  ===========================*/
 
@@ -397,7 +409,7 @@ TEST(SyscallEnter, socketcall_accept4E)
 	/*=============================== TRIGGER SYSCALL  ===========================*/
 
 	int32_t mock_fd = -1;
-	struct sockaddr *addr = NULL;
+	sockaddr* addr = NULL;
 	socklen_t *addrlen = NULL;
 	int flags = 0;
 
@@ -472,8 +484,8 @@ TEST(SyscallEnter, socketcall_listenE)
 	/* Parameter 1: fd (type: PT_FD) */
 	evt_test->assert_numeric_param(1, (int64_t)socket_fd);
 
-	/* Parameter 2: backlog (type: PT_UINT32) */
-	evt_test->assert_numeric_param(2, (uint32_t)backlog);
+	/* Parameter 2: backlog (type: PT_INT32) */
+	evt_test->assert_numeric_param(2, (int32_t)backlog);
 
 	/*=============================== ASSERT PARAMETERS  ===========================*/
 
@@ -495,7 +507,7 @@ TEST(SyscallEnter, socketcall_recvfromE)
 	char received_data[MAX_RECV_BUF_SIZE];
 	socklen_t received_data_len = MAX_RECV_BUF_SIZE;
 	uint32_t flags = 0;
-	struct sockaddr *src_addr = NULL;
+	sockaddr* src_addr = NULL;
 	socklen_t *addrlen = NULL;
 
 	unsigned long args[6] = {0};
@@ -605,8 +617,8 @@ TEST(SyscallEnter, socketcall_sendtoE)
 
 	int32_t client_socket_fd = 0;
 	int32_t server_socket_fd = 0;
-	struct sockaddr_in client_addr = {0};
-	struct sockaddr_in server_addr = {0};
+	sockaddr_in client_addr = {0};
+	sockaddr_in server_addr = {0};
 	evt_test->connect_ipv4_client_to_server(&client_socket_fd, &client_addr, &server_socket_fd, &server_addr);
 
 	/* Send a message to the server */
@@ -673,8 +685,8 @@ TEST(SyscallEnter, socketcall_sendmsgE)
 
 	int32_t client_socket_fd = 0;
 	int32_t server_socket_fd = 0;
-	struct sockaddr_in client_addr = {0};
-	struct sockaddr_in server_addr = {0};
+	sockaddr_in client_addr = {0};
+	sockaddr_in server_addr = {0};
 	evt_test->connect_ipv4_client_to_server(&client_socket_fd, &client_addr, &server_socket_fd, &server_addr);
 
 	/* Send a message to the server */
@@ -682,7 +694,7 @@ TEST(SyscallEnter, socketcall_sendmsgE)
 	struct iovec iov[3];
 	memset(&send_msg, 0, sizeof(send_msg));
 	memset(iov, 0, sizeof(iov));
-	send_msg.msg_name = (struct sockaddr *)&server_addr;
+	send_msg.msg_name = (sockaddr*)&server_addr;
 	send_msg.msg_namelen = sizeof(server_addr);
 	char sent_data_1[FIRST_MESSAGE_LEN] = "hey! there is a first message here.";
 	char sent_data_2[SECOND_MESSAGE_LEN] = "hey! there is a second message here.";
@@ -1078,5 +1090,121 @@ TEST(SyscallEnter, socketcall_getsocknameE)
 	evt_test->assert_num_params_pushed(0);
 }
 #endif
+
+TEST(SyscallEnter, socketcall_wrong_code_socketcall_interesting)
+{
+	// We send a wrong code so the event will be dropped
+	auto evt_test = get_syscall_event_test(__NR_socketcall, ENTER_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	unsigned long args[3] = {0};
+	args[0] = 47;
+	args[1] = 0;
+	args[2] = 0;
+	int wrong_code = 1230;
+
+	assert_syscall_state(SYSCALL_FAILURE, "socketcall", syscall(__NR_socketcall, wrong_code, args));
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	evt_test->assert_event_absence(CURRENT_PID, PPME_GENERIC_E);
+}
+
+TEST(SyscallEnter, socketcall_wrong_code_socketcall_not_interesting)
+{
+	// Same as the previous test
+	auto evt_test = get_syscall_event_test(__NR_setsockopt, ENTER_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	unsigned long args[3] = {0};
+	args[0] = 47;
+	args[1] = 0;
+	args[2] = 0;
+	int wrong_code = 1230;
+
+	assert_syscall_state(SYSCALL_FAILURE, "socketcall", syscall(__NR_socketcall, wrong_code, args));
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	evt_test->assert_event_absence(CURRENT_PID, PPME_GENERIC_E);
+}
+
+TEST(SyscallEnter, socketcall_null_pointer)
+{
+	auto evt_test = get_syscall_event_test(__NR_shutdown, ENTER_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	assert_syscall_state(SYSCALL_FAILURE, "socketcall", syscall(__NR_socketcall, SYS_SHUTDOWN, NULL));
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	if(evt_test->is_kmod_engine())
+	{
+		/* with a null pointer we are not able to correctly obtain the event so right now we drop it. */
+		evt_test->assert_event_absence();
+		SUCCEED();
+		return;
+	}
+
+	/* in bpf and modern bpf we can obtain an event even with a null pointer, but
+	 * all parameters will be 0.
+	 */
+	evt_test->assert_event_presence();
+
+	if(HasFatalFailure())
+	{
+		return;
+	}
+
+	evt_test->parse_event();
+
+	evt_test->assert_header();
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	/* Parameter 1: fd (type: PT_FD) */
+	evt_test->assert_numeric_param(1, (int64_t)0);
+
+	/* Parameter 2: how (type: PT_ENUMFLAGS8) */
+	evt_test->assert_numeric_param(2, (uint8_t)0);
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	evt_test->assert_num_params_pushed(2);
+}
+
+TEST(SyscallEnter, socketcall_null_pointer_and_wrong_code_socketcall_interesting)
+{
+	// We send a wrong code so the event will be dropped
+	auto evt_test = get_syscall_event_test(__NR_socketcall, ENTER_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	int wrong_code = 1230;
+	assert_syscall_state(SYSCALL_FAILURE, "socketcall", syscall(__NR_socketcall, wrong_code, NULL));
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+	evt_test->assert_event_absence(CURRENT_PID, PPME_GENERIC_E);
+}
 
 #endif /* __NR_socketcall */

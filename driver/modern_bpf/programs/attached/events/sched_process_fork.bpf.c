@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -45,7 +46,7 @@ int BPF_PROG(sched_p_fork,
 	pid_t child_pid = 0;
 	READ_TASK_FIELD_INTO(&child_pid, child, pid);
 	struct ppm_evt_hdr *hdr = (struct ppm_evt_hdr *)auxmap->data;
-	hdr->tid = (u64)child_pid;
+	hdr->tid = (uint64_t)child_pid;
 
 	/* Parameter 1: res (type: PT_ERRNO) */
 	/* Please note: here we are in the clone child exit
@@ -69,7 +70,7 @@ int BPF_PROG(sched_p_fork,
 	/* We need to extract the len of `exe` arg so we can understand
 	 * the overall length of the remaining args.
 	 */
-	u16 exe_arg_len = auxmap__store_charbuf_param(auxmap, arg_start_pointer, MAX_PROC_EXE, USER);
+	uint16_t exe_arg_len = auxmap__store_charbuf_param(auxmap, arg_start_pointer, MAX_PROC_EXE, USER);
 
 	/* Parameter 3: args (type: PT_CHARBUFARRAY) */
 	/* Here we read the whole array starting from the pointer to the first
@@ -81,17 +82,17 @@ int BPF_PROG(sched_p_fork,
 
 	/* Parameter 4: tid (type: PT_PID) */
 	/* this is called `tid` but it is the `pid`. */
-	s64 pid = (s64)extract__task_xid_nr(child, PIDTYPE_PID);
+	int64_t pid = (int64_t)extract__task_xid_nr(child, PIDTYPE_PID);
 	auxmap__store_s64_param(auxmap, pid);
 
 	/* Parameter 5: pid (type: PT_PID) */
 	/* this is called `pid` but it is the `tgid`. */
-	s64 tgid = (s64)extract__task_xid_nr(child, PIDTYPE_TGID);
+	int64_t tgid = (int64_t)extract__task_xid_nr(child, PIDTYPE_TGID);
 	auxmap__store_s64_param(auxmap, tgid);
 
 	/* Parameter 6: ptid (type: PT_PID) */
 	/* this is called `ptid` but it is the `pgid`. */
-	s64 pgid = (s64)extract__task_xid_nr(child, PIDTYPE_PGID);
+	int64_t pgid = (int64_t)extract__task_xid_nr(child, PIDTYPE_PGID);
 	auxmap__store_s64_param(auxmap, pgid);
 
 	/* Parameter 7: cwd (type: PT_CHARBUF) */
@@ -117,15 +118,15 @@ int BPF_PROG(sched_p_fork,
 	READ_TASK_FIELD_INTO(&mm, child, mm);
 
 	/* Parameter 11: vm_size (type: PT_UINT32) */
-	u32 vm_size = extract__vm_size(mm);
+	uint32_t vm_size = extract__vm_size(mm);
 	auxmap__store_u32_param(auxmap, vm_size);
 
 	/* Parameter 12: vm_rss (type: PT_UINT32) */
-	u32 vm_rss = extract__vm_rss(mm);
+	uint32_t vm_rss = extract__vm_rss(mm);
 	auxmap__store_u32_param(auxmap, vm_rss);
 
 	/* Parameter 13: vm_swap (type: PT_UINT32) */
-	u32 vm_swap = extract__vm_swap(mm);
+	uint32_t vm_swap = extract__vm_swap(mm);
 	auxmap__store_u32_param(auxmap, vm_swap);
 
 	/* Parameter 14: comm (type: PT_CHARBUF) */
@@ -153,7 +154,7 @@ int BPF_PROG(t1_sched_p_fork,
 	auxmap__store_cgroups_param(auxmap, child);
 
 	/* Parameter 16: flags (type: PT_FLAGS32) */
-	u32 flags = 0;
+	uint32_t flags = 0;
 
 	/* Since Linux 2.5.35, the flags mask must also include
 	 * CLONE_SIGHAND if CLONE_THREAD is specified (and note that,
@@ -180,8 +181,6 @@ int BPF_PROG(t1_sched_p_fork,
 	{
 		flags |= PPM_CL_CLONE_FILES;
 	}
-	auxmap__store_u32_param(auxmap, flags);
-
 
 	/* It's possible to have a process in a PID namespace that
 	 * nevertheless has tid == vtid, so we need to generate this
@@ -194,24 +193,25 @@ int BPF_PROG(t1_sched_p_fork,
 	{
 		flags |= PPM_CL_CHILD_IN_PIDNS;
 	}
+	auxmap__store_u32_param(auxmap, flags);
 
 	/* Parameter 17: uid (type: PT_UINT32) */
-	u32 euid = 0;
+	uint32_t euid = 0;
 	extract__euid(child, &euid);
 	auxmap__store_u32_param(auxmap, euid);
 
 	/* Parameter 18: gid (type: PT_UINT32) */
-	u32 egid = 0;
+	uint32_t egid = 0;
 	extract__egid(child, &egid);
 	auxmap__store_u32_param(auxmap, egid);
 
 	/* Parameter 19: vtid (type: PT_PID) */
 	pid_t vtid = extract__task_xid_vnr(child, PIDTYPE_PID);
-	auxmap__store_s64_param(auxmap, (s64)vtid);
+	auxmap__store_s64_param(auxmap, (int64_t)vtid);
 
 	/* Parameter 20: vpid (type: PT_PID) */
 	pid_t vpid = extract__task_xid_vnr(child, PIDTYPE_TGID);
-	auxmap__store_s64_param(auxmap, (s64)vpid);
+	auxmap__store_s64_param(auxmap, (int64_t)vpid);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

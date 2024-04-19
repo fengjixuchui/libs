@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -21,6 +22,16 @@ or GPL2.txt for full copies of the license.
 #define TP_NAME "raw_tracepoint/"
 #else
 #define TP_NAME "tracepoint/"
+#endif
+
+#ifdef BPF_SUPPORTS_RAW_TRACEPOINTS
+#define BPF_PROBE(prefix, event, type)			\
+__bpf_section(TP_NAME #event)				\
+int bpf_##event(struct type *ctx)
+#else
+#define BPF_PROBE(prefix, event, type)			\
+__bpf_section(TP_NAME prefix #event)			\
+int bpf_##event(struct type *ctx)
 #endif
 
 #ifdef BPF_SUPPORTS_RAW_TRACEPOINTS
@@ -195,7 +206,7 @@ struct perf_event_sample {
 };
 
 /*
- * Unfortunately the entire perf event length must fit in u16
+ * Unfortunately the entire perf event length must fit in uint16_t
  */
 #define PERF_EVENT_MAX_SIZE (0xffff - sizeof(struct perf_event_sample))
 
@@ -224,8 +235,9 @@ enum scap_map_types {
 	SCAP_SETTINGS_MAP = 7,
 	SCAP_LOCAL_STATE_MAP = 8,
 	SCAP_INTERESTING_SYSCALLS_TABLE = 9,
+	SCAP_IA32_64_MAP = 10,
 #ifndef BPF_SUPPORTS_RAW_TRACEPOINTS
-	SCAP_STASH_MAP = 10,
+	SCAP_STASH_MAP = 11,
 #endif
 };
 
@@ -238,7 +250,6 @@ struct scap_bpf_settings {
 	bool dropping_mode;
 	bool is_dropping;
 	bool drop_failed;
-	bool tracers_enabled;
 	uint16_t fullcapture_port_range_start;
 	uint16_t fullcapture_port_range_end;
 	uint16_t statsd_port;
@@ -251,6 +262,7 @@ struct tail_context {
 	unsigned long curoff;
 	unsigned long len;
 	int prev_res;
+	int socketcall_syscall_id;
 } __attribute__((packed));
 
 struct scap_bpf_per_cpu_state {
@@ -270,6 +282,8 @@ struct scap_bpf_per_cpu_state {
 	unsigned long long n_drops_buffer_dir_file_exit;
 	unsigned long long n_drops_buffer_other_interest_enter;		/* Category of other system calls of interest, not all other system calls that did not match a category from above. */
 	unsigned long long n_drops_buffer_other_interest_exit;
+	unsigned long long n_drops_buffer_close_exit;
+	unsigned long long n_drops_buffer_proc_exit;
 	unsigned long long n_drops_scratch_map;		/* Number of kernel side scratch map drops. */
 	unsigned long long n_drops_pf;		/* Number of kernel side page faults drops (invalid memory access). */
 	unsigned long long n_drops_bug;		/* Number of kernel side bug drops (invalid condition in the kernel instrumentation). */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,24 +16,24 @@ int BPF_PROG(signalfd_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SIGNALFD_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SIGNALFD_E_SIZE, PPME_SYSCALL_SIGNALFD_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_SIGNALFD_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: fd (type: PT_FD) */
-	s32 fd = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/* Parameter 2: mask (type: PT_UINT32) */
 	/* Right now we are not interested in the `sigmask`, we can populate it if we need */
 	ringbuf__store_u32(&ringbuf, 0);
 
-	/* Parameter 3: flags (type: PT_FLAGS8) */
+	/* Parameter 3: flags (type: PT_UINT8) */
 	/* The syscall `signalfd` has no flags! only `signalfd4` has the `flags` param.
 	 * For compatibility with the event definition here we send `0` as flags.
 	 */
@@ -55,12 +56,12 @@ int BPF_PROG(signalfd_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SIGNALFD_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SIGNALFD_X_SIZE, PPME_SYSCALL_SIGNALFD_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_SIGNALFD_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

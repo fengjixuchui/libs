@@ -6,7 +6,12 @@ name: Driver SCHEMA_VERSION checks
 on:
   pull_request_target:
     paths:
+      - 'driver/ppm_fillers.c'
+      - 'driver/bpf/fillers.h'
       - 'driver/event_table.c'
+      - 'driver/ppm_events_public.h'
+      - 'driver/event_stats.h'
+      - 'driver/syscall_*'
 
 jobs:
   paths-filter:
@@ -14,8 +19,8 @@ jobs:
     outputs:
       driver_schema_changed: ${{ steps.filter.outputs.driver_schema }}
     steps:
-    - uses: actions/checkout@v2
-    - uses: dorny/paths-filter@v2
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - uses: dorny/paths-filter@4512585405083f25c027a35db413c2b3b9006d50 # v2.11.1
       id: filter
       with:
         filters: |
@@ -29,8 +34,21 @@ jobs:
     needs: paths-filter
     if: needs.paths-filter.outputs.driver_schema_changed == 'false'
     steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
       - name: Check driver SCHEMA_VERSION
-        uses: mshick/add-pr-comment@v2
+        uses: mshick/add-pr-comment@7c0890544fb33b0bdd2e59467fbacb62e028a096 # v2.8.1
         with:
           message: |
             Please double check **driver/SCHEMA_VERSION** file. See [versioning](https://github.com/falcosecurity/libs/blob/master/driver/README.VERSION.md#schema-version-number).
+            
+            /hold
+
+      - name: Trigger failure
+        run: |
+          echo Driver schema version likely needs to be bumped
+          cat ./driver/SCHEMA_VERSION
+          echo
+          echo Please double check **driver/SCHEMA_VERSION** file.
+          echo See: https://github.com/falcosecurity/libs/blob/master/driver/README.VERSION.md#schema-version-number.
+          exit 1

@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -18,12 +19,9 @@ or GPL2.txt for full copies of the license.
 #include <linux/fdtable.h>
 #include <linux/net.h>
 
-#include "../ppm_flag_helpers.h"
+#include "ppm_flag_helpers.h"
 #include "builtins.h"
-
-// Old kernels (like 4.14) have too strict limits on the bpf program length to support 32 path components. For the moment we decrease the limit to 16.
-#define MAX_PATH_COMPONENTS 16
-#define MAX_PATH_LENGTH 4096
+#include "missing_definitions.h"
 
 /* Helper used to please the verifier with operations on the number of arguments */
 #define SAFE_ARG_NUMBER(x) x & (PPM_MAX_EVENT_PARAMS - 1)
@@ -73,55 +71,183 @@ static __always_inline struct file *bpf_fget(int fd)
 	return fil;
 }
 
-// Kernel 5.10 introduced a new bpf_helper called `bpf_d_path` to extract a file path starting from a file descriptor.
-// Libscap loads our bpf programs as `BPF_PROG_TYPE_RAW_TRACEPOINT` programs. This type of program doesn't seem able to call this new helper because it is out of its scope. For more details see here https://github.com/torvalds/linux/blob/58e1100fdc5990b0cc0d4beaf2562a92e621ac7d/kernel/trace/bpf_trace.c#L1574
-static __always_inline char *bpf_get_path(struct filler_data *data, int fd)
+static __always_inline uint32_t bpf_get_fd_fmode_created(int fd)
 {
-	struct file *f = bpf_fget(fd);
-	const unsigned char** pointers_buf = (const unsigned char**)data->tmp_scratch;
-	char *filepath = (char *)&data->tmp_scratch[(MAX_PATH_COMPONENTS* sizeof(const unsigned char*)) & SCRATCH_SIZE_HALF];
+	if(fd < 0)
+    {
+        return 0;
+    }
 
-	struct dentry *de_p = _READ(f->f_path.dentry); 
-	if(!de_p)
+/* FMODE_CREATED flag was introduced in kernel 4.19 and it's not present in earlier versions */
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4, 19, 0)
+    struct file *file;
+    file = bpf_fget(fd);
+    if(file)
+    {
+        fmode_t fmode = _READ(file->f_mode);
+        if (fmode & FMODE_CREATED)
+            return PPM_O_F_CREATED;
+    }
+#endif
+    return 0;
+}
+
+/* In this kernel version the instruction limit was bumped from 131072 to 1000000.
+ * For this reason we use different values of `MAX_NUM_COMPONENTS`
+ * according to the kernel version.
+ */
+#if(LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0))
+#define MAX_NUM_COMPONENTS 48
+#else
+#define MAX_NUM_COMPONENTS 24
+#endif
+
+/* We must always leave at least 4096 bytes free in our tmp scratch space
+ * to please the verifier since we set the max component len to 4096 bytes.
+ * We start writing our exepath from half of the tmp scratch space. The
+ * whole space is 256 KB, we start at 128 KB.
+ *
+ *       128 KB           128 KB (Free space to please the verifier)
+ * |----------------|----------------|
+ *                  ^
+ *                  |
+ *        We start here and write backward
+ *        as we find components of the path
+ *
+ * As a bitmask we use `SAFE_TMP_SCRATCH_ACCESS` (128*1024 - 1).
+ * This helps the verifier to understand that our offset never overcomes
+ * 128 KB.
+ */
+#define MAX_COMPONENT_LEN 4096
+#define MAX_TMP_SCRATCH_LEN (SCRATCH_SIZE >> 1)
+#define SAFE_TMP_SCRATCH_ACCESS(x) (x) & (MAX_TMP_SCRATCH_LEN - 1)
+
+/* Please note: Kernel 5.10 introduced a new bpf_helper called `bpf_d_path`
+ * to extract a file path starting from a struct* file but it can be used only
+ * with specific hooks:
+ *
+ * https://github.com/torvalds/linux/blob/e0dccc3b76fb35bb257b4118367a883073d7390e/kernel/trace/bpf_trace.c#L915-L929.
+ *
+ * So we need to do it by hand emulating its behavior.
+ * This brings some limitations:
+ * 1. the number of path components is limited to `MAX_NUM_COMPONENTS`.
+ * 2. we cannot use locks so we can face race conditions during the path reconstruction.
+ * 3. reconstructed path could be slightly different from the one returned by `d_path`.
+ *    See pseudo_filesystem prefixes or the " (deleted)" suffix.
+ *
+ * Take a look at the research that led to this implementation:
+ * https://github.com/falcosecurity/libs/issues/1111
+ */
+static __always_inline char *bpf_d_path_approx(struct filler_data *data, struct path *path)
+{
+	struct path f_path = {};
+	bpf_probe_read_kernel(&f_path, sizeof(struct path), path);
+	struct dentry *dentry = f_path.dentry;
+	struct vfsmount *vfsmnt = f_path.mnt;
+	struct mount *mnt_p = container_of(vfsmnt, struct mount, mnt);
+	struct mount *mnt_parent_p = NULL;
+	bpf_probe_read_kernel(&mnt_parent_p, sizeof(struct mount *), &(mnt_p->mnt_parent));
+	struct dentry *mnt_root_p = NULL;
+	bpf_probe_read_kernel(&mnt_root_p, sizeof(struct dentry *), &(vfsmnt->mnt_root));
+
+	/* This is the max length of the buffer in which we will write the full path. */
+	uint32_t max_buf_len = MAX_TMP_SCRATCH_LEN;
+
+	/* Populated inside the loop */
+	struct dentry *d_parent = NULL;
+	struct qstr d_name = {};
+	uint32_t current_off = 0;
+	int effective_name_len = 0;
+	char slash = '/';
+	char terminator = '\0';
+
+#pragma unroll
+	for(int i = 0; i < MAX_NUM_COMPONENTS; i++)
 	{
-		return NULL;
-	}
-	struct dentry de = _READ(*de_p); 
-	uint16_t i = 0;
-	pointers_buf[i & (MAX_PATH_COMPONENTS-1)] = de.d_name.name;
-	uint16_t nreads = 1;
-
-	# pragma unroll MAX_PATH_COMPONENTS
-	for(i = 1; i < MAX_PATH_COMPONENTS && de.d_parent != de_p; i++)
-	{
-		de_p = de.d_parent;
-		de = _READ(*de.d_parent);
-		pointers_buf[i & (MAX_PATH_COMPONENTS-1)] = de.d_name.name;
-		nreads++;
-	}
-
-	uint32_t curoff_bounded = 0;
-	uint16_t path_level = 0;
-	int res = 0;
-
-	# pragma unroll MAX_PATH_COMPONENTS
-	for(i = 1; i < MAX_PATH_COMPONENTS && i <= nreads && res >= 0; i++)
-	{
-		path_level = (nreads-i) & (MAX_PATH_COMPONENTS-1);	
-		res = bpf_probe_read_kernel_str(&filepath[curoff_bounded], MAX_PATH_LENGTH,
-				(const void*)pointers_buf[path_level]);	
-		curoff_bounded = (curoff_bounded+res-1) & SCRATCH_SIZE_HALF;
-		if(i>1 && i<nreads && res>0)
+		bpf_probe_read_kernel(&d_parent, sizeof(struct dentry *), &(dentry->d_parent));
+		if(dentry == d_parent && dentry != mnt_root_p)
 		{
-			filepath[curoff_bounded] = '/';
-			curoff_bounded = (curoff_bounded+1) & SCRATCH_SIZE_HALF;
+			/* We reached the root (dentry == d_parent)
+			 * but not the mount root...there is something weird, stop here.
+			 */
+			break;
 		}
+
+		if(dentry == mnt_root_p)
+		{
+			if(mnt_p != mnt_parent_p)
+			{
+				/* We reached root, but not global root - continue with mount point path */
+				bpf_probe_read_kernel(&dentry, sizeof(struct dentry *), &mnt_p->mnt_mountpoint);
+				bpf_probe_read_kernel(&mnt_p, sizeof(struct mount *), &mnt_p->mnt_parent);
+				bpf_probe_read_kernel(&mnt_parent_p, sizeof(struct mount *), &mnt_p->mnt_parent);
+				vfsmnt = &mnt_p->mnt;
+				bpf_probe_read_kernel(&mnt_root_p, sizeof(struct dentry *), &(vfsmnt->mnt_root));
+				continue;
+			}
+			else
+			{
+				/* We have the full path, stop here */
+				break;
+			}
+		}
+
+		/* Get the dentry name */
+		bpf_probe_read_kernel(&d_name, sizeof(struct qstr), &(dentry->d_name));
+
+		/* +1 for the terminator that is not considered in d_name.len.
+		 * Reserve space for the name trusting the len
+		 * written in `qstr` struct
+		 */
+		current_off = max_buf_len - (d_name.len + 1);
+
+		effective_name_len =
+			bpf_probe_read_kernel_str(&(data->tmp_scratch[SAFE_TMP_SCRATCH_ACCESS(current_off)]),
+						  MAX_COMPONENT_LEN, (void *)d_name.name);
+
+		/* This check shouldn't be necessary, right now we
+		 * keep it just to be extra safe. Unfortunately, it causes
+		 * verifier issues on s390x (5.15.0-75-generic Ubuntu s390x)
+		 */
+#ifndef CONFIG_S390
+		if(effective_name_len <= 1)
+		{
+			/* If effective_name_len is 0 or 1 we have an error
+			 * (path can't be null nor an empty string)
+			 */
+			break;
+		}
+#endif
+		/* 1. `max_buf_len -= 1` point to the `\0` of the just written name.
+		 * 2. We replace it with a `/`. Note that we have to use `bpf_probe_read_kernel`
+		 *    to please some old verifiers like (Oracle Linux 4.14).
+		 * 3. Then we set `max_buf_len` to the last written char.
+		 */
+		max_buf_len -= 1;
+		bpf_probe_read_kernel(&(data->tmp_scratch[SAFE_TMP_SCRATCH_ACCESS(max_buf_len)]), 1, &slash);
+		max_buf_len -= (effective_name_len - 1);
+
+		dentry = d_parent;
 	}
-	if(res<0)
+
+	if(max_buf_len == MAX_TMP_SCRATCH_LEN)
 	{
-		return NULL;
+		/* memfd files have no path in the filesystem so we never decremented the `max_buf_len` */
+		bpf_probe_read_kernel(&d_name, sizeof(struct qstr), &(dentry->d_name));
+		bpf_probe_read_kernel_str(&(data->tmp_scratch[0]), MAX_COMPONENT_LEN, (void *)d_name.name);
+		return data->tmp_scratch;
 	}
-	return filepath;
+
+	/* Add leading slash */
+	max_buf_len -= 1;
+	bpf_probe_read_kernel(&(data->tmp_scratch[SAFE_TMP_SCRATCH_ACCESS(max_buf_len)]), 1, &slash);
+
+	/* Null terminate the path string.
+	 * Replace the first `/` we added in the loop with `\0`
+	 */
+	bpf_probe_read_kernel(&(data->tmp_scratch[SAFE_TMP_SCRATCH_ACCESS(MAX_TMP_SCRATCH_LEN - 1)]), 1, &terminator);
+
+	return &(data->tmp_scratch[SAFE_TMP_SCRATCH_ACCESS(max_buf_len)]);
 }
 
 static __always_inline struct socket *bpf_sockfd_lookup(struct filler_data *data,
@@ -213,7 +339,7 @@ static __always_inline bool bpf_getsockname(struct socket *sock,
 			sin->sin_port = _READ(inet->inet_dport);
 			sin->sin_addr.s_addr = _READ(inet->inet_daddr);
 		} else {
-			u32 addr = _READ(inet->inet_rcv_saddr);
+			uint32_t addr = _READ(inet->inet_rcv_saddr);
 
 			if (!addr)
 				addr = _READ(inet->inet_saddr);
@@ -304,35 +430,16 @@ static __always_inline int bpf_addr_to_kernel(void *uaddr, int ulen,
 
 #define get_buf(x) data->buf[(data->state->tail_ctx.curoff + (x)) & SCRATCH_SIZE_HALF]
 
-static __always_inline u32 bpf_compute_snaplen(struct filler_data *data,
-					       u32 lookahead_size)
+static __always_inline uint32_t bpf_compute_snaplen(struct filler_data *data,
+					       uint32_t lookahead_size)
 {
 	struct sockaddr_storage *sock_address;
 	struct sockaddr_storage *peer_address;
-	u32 res = data->settings->snaplen;
+	uint32_t res = data->settings->snaplen;
 	struct socket *sock;
 	struct sock *sk;
-	u16 sport;
-	u16 dport;
-
-	if (data->settings->tracers_enabled &&
-	    data->state->tail_ctx.evt_type == PPME_SYSCALL_WRITE_X) {
-		struct file *fil;
-		struct inode *f_inode;
-		dev_t i_rdev;
-
-		fil = bpf_fget(data->fd);
-		if (!fil)
-			return res;
-
-		f_inode = _READ(fil->f_inode);
-		if (!f_inode)
-			return res;
-
-		i_rdev = _READ(f_inode->i_rdev);
-		if (i_rdev == PPM_NULL_RDEV)
-			return SNAPLEN_TRACERS_ENABLED;
-	}
+	uint16_t sport;
+	uint16_t dport;
 
 	if (!data->settings->do_dynamic_snaplen)
 		return res;
@@ -445,21 +552,24 @@ static __always_inline u32 bpf_compute_snaplen(struct filler_data *data,
 			}
 		}
 	} else if ((sport == PPM_PORT_MONGODB || dport == PPM_PORT_MONGODB) ||
-			(lookahead_size >= 16 && (*(s32 *)&get_buf(12) == 1 || /* matches header */
-						  *(s32 *)&get_buf(12) == 2001 ||
-						  *(s32 *)&get_buf(12) == 2002 ||
-						  *(s32 *)&get_buf(12) == 2003 ||
-						  *(s32 *)&get_buf(12) == 2004 ||
-						  *(s32 *)&get_buf(12) == 2005 ||
-						  *(s32 *)&get_buf(12) == 2006 ||
-						  *(s32 *)&get_buf(12) == 2007))) {
+			(lookahead_size >= 16 && (*(int32_t *)&get_buf(12) == 1 || /* matches header */
+						  *(int32_t *)&get_buf(12) == 2001 ||
+						  *(int32_t *)&get_buf(12) == 2002 ||
+						  *(int32_t *)&get_buf(12) == 2003 ||
+						  *(int32_t *)&get_buf(12) == 2004 ||
+						  *(int32_t *)&get_buf(12) == 2005 ||
+						  *(int32_t *)&get_buf(12) == 2006 ||
+						  *(int32_t *)&get_buf(12) == 2007))) {
 		return SNAPLEN_EXTENDED;
 	} else if (dport == data->settings->statsd_port) {
 		return SNAPLEN_EXTENDED;
 	} else {
 		if (lookahead_size >= 5) {
-			u32 buf = *(u32 *)&get_buf(0);
+			uint32_t buf = *(uint32_t *)&get_buf(0);
 
+#ifdef CONFIG_S390
+			buf = __builtin_bswap32(buf);
+#endif
 			if (buf == BPF_HTTP_GET ||
 			    buf == BPF_HTTP_POST ||
 			    buf == BPF_HTTP_PUT ||
@@ -498,17 +608,17 @@ static __always_inline int unix_socket_path(char *dest, const char *user_ptr, si
 	return res;
 }
 
-static __always_inline u16 bpf_pack_addr(struct filler_data *data,
+static __always_inline uint16_t bpf_pack_addr(struct filler_data *data,
 					 struct sockaddr *usrsockaddr,
 					 int ulen)
 {
-	u32 ip;
-	u16 port;
+	uint32_t ip;
+	uint16_t port;
 	sa_family_t family = usrsockaddr->sa_family;
 	struct sockaddr_in *usrsockaddr_in;
 	struct sockaddr_in6 *usrsockaddr_in6;
 	struct sockaddr_un *usrsockaddr_un;
-	u16 size;
+	uint16_t size;
 	char *dest;
 	int res;
 
@@ -629,10 +739,10 @@ static __always_inline long bpf_fd_to_socktuple(struct filler_data *data,
 	switch (family) {
 	case AF_INET:
 	{
-		u32 sip;
-		u32 dip;
-		u16 sport;
-		u16 dport;
+		uint32_t sip;
+		uint32_t dip;
+		uint16_t sport;
+		uint16_t dport;
 
 		if (!use_userdata) {
 			if (bpf_getsockname(sock, peer_address, 1)) {
@@ -657,14 +767,26 @@ static __always_inline long bpf_fd_to_socktuple(struct filler_data *data,
 			struct sockaddr_in *usrsockaddr_in = (struct sockaddr_in *)usrsockaddr;
 
 			if (is_inbound) {
-				/* To take inbound info we cannot use the `src_addr` obtained from the syscall
-				 * it could be empty!
-				 * From kernel 3.13 we can take both ipv4 and ipv6 info from here
-				 * https://elixir.bootlin.com/linux/v3.13/source/include/net/sock.h#L164
+				/* To take peer address info we try to use the kernel where possible.
+				 * TCP allows us to obtain the right information, while the kernel doesn't fill
+				 * `sk->__sk_common.skc_daddr` for UDP connection.
+				 * Instead of having a custom logic for each protocol we try to read from
+				 * kernel structs and if we don't find valid data we fallback to userspace
+				 * structs.
 				 */
-				bpf_probe_read_kernel(&sip, sizeof(sip), &sk->__sk_common.skc_daddr);
 				bpf_probe_read_kernel(&sport, sizeof(sport), &sk->__sk_common.skc_dport);
-				sport = ntohs(sport);
+				if(sport != 0)
+				{
+					/* We can read from the kernel */
+					bpf_probe_read_kernel(&sip, sizeof(sip), &sk->__sk_common.skc_daddr);
+					sport = ntohs(sport);
+				}
+				else
+				{
+					/* Fallback to userspace struct */
+					sip = usrsockaddr_in->sin_addr.s_addr;
+					sport = ntohs(usrsockaddr_in->sin_port);
+				}
 				dip = ((struct sockaddr_in *)sock_address)->sin_addr.s_addr;
 				dport = ntohs(((struct sockaddr_in *)sock_address)->sin_port);
 			} else {
@@ -687,10 +809,10 @@ static __always_inline long bpf_fd_to_socktuple(struct filler_data *data,
 	}
 	case AF_INET6:
 	{
-		u8 *sip6;
-		u8 *dip6;
-		u16 sport;
-		u16 dport;
+		uint8_t *sip6;
+		uint8_t *dip6;
+		uint16_t sport;
+		uint16_t dport;
 
 		if (!use_userdata) {
 			if (bpf_getsockname(sock, peer_address, 1)) {
@@ -707,8 +829,8 @@ static __always_inline long bpf_fd_to_socktuple(struct filler_data *data,
 				}
 			} else {
 				memset(peer_address, 0, 16);
-				sip6 = (u8 *)peer_address;
-				dip6 = (u8 *)peer_address;
+				sip6 = (uint8_t *)peer_address;
+				dip6 = (uint8_t *)peer_address;
 				sport = 0;
 				dport = 0;
 			}
@@ -719,10 +841,20 @@ static __always_inline long bpf_fd_to_socktuple(struct filler_data *data,
 			struct sockaddr_in6 *usrsockaddr_in6 = (struct sockaddr_in6 *)usrsockaddr;
 
 			if (is_inbound) {
-				bpf_probe_read_kernel(&in6, sizeof(in6), &sk->__sk_common.skc_v6_daddr);
-				sip6 = in6.in6_u.u6_addr8;
 				bpf_probe_read_kernel(&sport, sizeof(sport), &sk->__sk_common.skc_dport);
-				sport = ntohs(sport);
+				if(sport != 0)
+				{
+					/* We can read from the kernel */
+					bpf_probe_read_kernel(&in6, sizeof(in6), &sk->__sk_common.skc_v6_daddr);
+					sip6 = in6.in6_u.u6_addr8;
+					sport = ntohs(sport);
+				}
+				else
+				{
+					/* Fallback to userspace struct */
+					sip6 = usrsockaddr_in6->sin6_addr.s6_addr;
+					sport = ntohs(usrsockaddr_in6->sin6_port);
+				}
 				dip6 = ((struct sockaddr_in6 *)sock_address)->sin6_addr.s6_addr;
 				dport = ntohs(((struct sockaddr_in6 *)sock_address)->sin6_port);
 			} else {
@@ -814,7 +946,7 @@ static __always_inline long bpf_fd_to_socktuple(struct filler_data *data,
 static __always_inline int __bpf_read_val_into(struct filler_data *data,
 					       unsigned long curoff_bounded,
 					       unsigned long val,
-					       volatile u16 read_size,
+					       volatile uint16_t read_size,
 					       enum read_memory mem)
 {
 	int rc;
@@ -845,7 +977,7 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 					     unsigned long val,
 					     unsigned long val_len,
 					     enum ppm_param_type type,
-					     u8 dyn_idx,
+					     uint8_t dyn_idx,
 					     bool enforce_snaplen,
 					     enum read_memory mem)
 {
@@ -859,9 +991,9 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
 
-	if (dyn_idx != (u8)-1) {
-		*((u8 *)&data->buf[curoff_bounded]) = dyn_idx;
-		len_dyn = sizeof(u8);
+	if (dyn_idx != (uint8_t)-1) {
+		*((uint8_t *)&data->buf[curoff_bounded]) = dyn_idx;
+		len_dyn = sizeof(uint8_t);
 		data->state->tail_ctx.curoff += len_dyn;
 		data->state->tail_ctx.len += len_dyn;
 	}
@@ -911,7 +1043,7 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 
 			if(enforce_snaplen) 
 			{
-				u32 dpi_lookahead_size = DPI_LOOKAHEAD_SIZE;
+				uint32_t dpi_lookahead_size = DPI_LOOKAHEAD_SIZE;
 				unsigned int sl;
 
 				if(dpi_lookahead_size > len)
@@ -925,7 +1057,7 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 					 * If we are not able to read at least `dpi_lookahead_size` 
 					 * we send an empty param `len=0`.
 					 */
-					volatile u16 read_size = dpi_lookahead_size;
+					volatile uint16_t read_size = dpi_lookahead_size;
 					int rc = 0;
 
 					rc = __bpf_read_val_into(data, curoff_bounded, val, read_size, mem);
@@ -951,7 +1083,7 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 
 			if(!data->curarg_already_on_frame)
 			{
-				volatile u16 read_size = len;
+				volatile uint16_t read_size = len;
 				int rc = 0;
 
 				curoff_bounded = data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF;
@@ -1000,15 +1132,15 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 	case PT_ENUMFLAGS8:
 	case PT_UINT8:
 	case PT_SIGTYPE:
-		*((u8 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(u8);
+		*((uint8_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(uint8_t);
 		break;
 	case PT_FLAGS16:
 	case PT_ENUMFLAGS16:
 	case PT_UINT16:
 	case PT_SYSCALLID:
-		*((u16 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(u16);
+		*((uint16_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(uint16_t);
 		break;
 	case PT_FLAGS32:
 	case PT_MODE:
@@ -1017,33 +1149,33 @@ static __always_inline int __bpf_val_to_ring(struct filler_data *data,
 	case PT_GID:
 	case PT_SIGSET:
 	case PT_ENUMFLAGS32:
-		*((u32 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(u32);
+		*((uint32_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(uint32_t);
 		break;
 	case PT_RELTIME:
 	case PT_ABSTIME:
 	case PT_UINT64:
-		*((u64 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(u64);
+		*((uint64_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(uint64_t);
 		break;
 	case PT_INT8:
-		*((s8 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(s8);
+		*((int8_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(int8_t);
 		break;
 	case PT_INT16:
-		*((s16 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(s16);
+		*((int16_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(int16_t);
 		break;
 	case PT_INT32:
-		*((s32 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(s32);
+		*((int32_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(int32_t);
 		break;
 	case PT_INT64:
 	case PT_ERRNO:
 	case PT_FD:
 	case PT_PID:
-		*((s64 *)&data->buf[curoff_bounded]) = val;
-		len = sizeof(s64);
+		*((int64_t *)&data->buf[curoff_bounded]) = val;
+		len = sizeof(int64_t);
 		break;
 	default: {
 		bpf_printk("unhandled type in bpf_val_to_ring: evt_type %d, curarg %d, type %d\n",
@@ -1119,15 +1251,15 @@ static __always_inline int bpf_val_to_ring_mem(struct filler_data *data,
 }
 
 /// TODO: @Andreagit97 these functions should return void
-static __always_inline int bpf_push_s64_to_ring(struct filler_data *data, s64 val)
+static __always_inline int bpf_push_s64_to_ring(struct filler_data *data, int64_t val)
 {
 	/// TODO: @Andreagit97 this could be removed in a second iteration.
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(s64);
-	*((s64 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(int64_t);
+	*((int64_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	/// TODO: @Andreagit97 this could be simplified
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
@@ -1138,14 +1270,14 @@ static __always_inline int bpf_push_s64_to_ring(struct filler_data *data, s64 va
 	return PPM_SUCCESS;
 }
 
-static __always_inline int bpf_push_u64_to_ring(struct filler_data *data, u64 val)
+static __always_inline int bpf_push_u64_to_ring(struct filler_data *data, uint64_t val)
 {
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(u64);
-	*((u64 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(uint64_t);
+	*((uint64_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
@@ -1155,14 +1287,14 @@ static __always_inline int bpf_push_u64_to_ring(struct filler_data *data, u64 va
 	return PPM_SUCCESS;
 }
 
-static __always_inline int bpf_push_u32_to_ring(struct filler_data *data, u32 val)
+static __always_inline int bpf_push_u32_to_ring(struct filler_data *data, uint32_t val)
 {
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(u32);
-	*((u32 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(uint32_t);
+	*((uint32_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
@@ -1172,14 +1304,14 @@ static __always_inline int bpf_push_u32_to_ring(struct filler_data *data, u32 va
 	return PPM_SUCCESS;
 }
 
-static __always_inline int bpf_push_s32_to_ring(struct filler_data *data, s32 val)
+static __always_inline int bpf_push_s32_to_ring(struct filler_data *data, int32_t val)
 {
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(s32);
-	*((s32 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(int32_t);
+	*((int32_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
@@ -1189,14 +1321,14 @@ static __always_inline int bpf_push_s32_to_ring(struct filler_data *data, s32 va
 	return PPM_SUCCESS;
 }
 
-static __always_inline int bpf_push_u16_to_ring(struct filler_data *data, u16 val)
+static __always_inline int bpf_push_u16_to_ring(struct filler_data *data, uint16_t val)
 {
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(u16);
-	*((u16 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(uint16_t);
+	*((uint16_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
@@ -1206,14 +1338,14 @@ static __always_inline int bpf_push_u16_to_ring(struct filler_data *data, u16 va
 	return PPM_SUCCESS;
 }
 
-static __always_inline int bpf_push_s16_to_ring(struct filler_data *data, s16 val)
+static __always_inline int bpf_push_s16_to_ring(struct filler_data *data, int16_t val)
 {
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(s16);
-	*((s16 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(int16_t);
+	*((int16_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
@@ -1223,14 +1355,14 @@ static __always_inline int bpf_push_s16_to_ring(struct filler_data *data, s16 va
 	return PPM_SUCCESS;
 }
 
-static __always_inline int bpf_push_u8_to_ring(struct filler_data *data, u8 val)
+static __always_inline int bpf_push_u8_to_ring(struct filler_data *data, uint8_t val)
 {
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(u8);
-	*((u8 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(uint8_t);
+	*((uint8_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
@@ -1240,14 +1372,14 @@ static __always_inline int bpf_push_u8_to_ring(struct filler_data *data, u8 val)
 	return PPM_SUCCESS;
 }
 
-static __always_inline int bpf_push_s8_to_ring(struct filler_data *data, s16 val)
+static __always_inline int bpf_push_s8_to_ring(struct filler_data *data, int16_t val)
 {
 	if (data->state->tail_ctx.curoff > SCRATCH_SIZE_HALF)
 	{
 		return PPM_FAILURE_FRAME_SCRATCH_MAP_FULL;
 	}
-	const unsigned int len = sizeof(s8);
-	*((s8 *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
+	const unsigned int len = sizeof(int8_t);
+	*((int8_t *)&data->buf[data->state->tail_ctx.curoff & SCRATCH_SIZE_HALF]) = val;
 	fixup_evt_arg_len(data->buf, data->state->tail_ctx.curarg, len);
 	data->state->tail_ctx.curoff += len;
 	data->state->tail_ctx.len += len;
@@ -1294,7 +1426,7 @@ static __always_inline int bpf_val_to_ring_len(struct filler_data *data,
 static __always_inline int bpf_val_to_ring_dyn(struct filler_data *data,
 					       unsigned long val,
 					       enum ppm_param_type type,
-					       u8 dyn_idx)
+					       uint8_t dyn_idx)
 {
 	return __bpf_val_to_ring(data, val, 0, type, dyn_idx, false, param_type_to_mem(type));
 }
@@ -1312,52 +1444,6 @@ static __always_inline int bpf_val_to_ring_type(struct filler_data *data,
 						enum ppm_param_type type)
 {
 	return __bpf_val_to_ring(data, val, 0, type, -1, false, param_type_to_mem(type));
-}
-
-static __always_inline bool bpf_in_ia32_syscall()
-{
-	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-	u32 status = 0;
-
-#ifdef CONFIG_X86_64
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 18)
-	status = _READ(task->thread.status);
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
-	status = _READ(task->thread_info.status);
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 2)
-	status = _READ(task->thread.status);
-#else
-	status = _READ(task->thread_info.status);
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 18) */
-
-	/* See here for the definition:
-	 * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/x86/include/asm/thread_info.h#L212
-	 */
-	return status & TS_COMPAT;
-
-#elif defined(CONFIG_ARM64)
-
-	/* See here for the definition:
-	 * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/arm64/include/asm/thread_info.h#L99
-	 */
-	status = _READ(task->thread_info.flags);
-	return status & _TIF_32BIT;
-
-#elif defined(CONFIG_S390)
-
-	/* See here for the definition: 
-	 * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/s390/include/asm/thread_info.h#L101
-	 */
-	status = _READ(task->thread_info.flags);
-	return status & _TIF_31BIT;
-
-#else
-
-	/* Unknown architecture. */
-	return false;
-
-#endif /* CONFIG_X86_64 */
 }
 
 #endif

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,24 +18,29 @@ limitations under the License.
 
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <set>
-#include <unordered_set>
-#include <cctype>
-#include <algorithm>
-#include <locale>
-#include <sstream>
+#include <libscap/scap.h>
+#include <libsinsp/sinsp_public.h>
+#include <libsinsp/tuples.h>
 
-#include <tuples.h>
-#include <scap.h>
-#include "json/json.h"
-#include "../common/types.h"
-#include "sinsp_public.h"
+#include <json/json.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <list>
+#include <locale>
+#include <set>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+#ifdef _MSC_VER
+#define strcasecmp _stricmp
+#endif
 
 class sinsp_evttables;
-typedef union _sinsp_sockinfo sinsp_sockinfo;
+union sinsp_sockinfo;
 class filter_check_info;
 
 extern sinsp_evttables g_infotables;
@@ -49,7 +55,6 @@ class sinsp_initializer
 {
 public:
 	sinsp_initializer();
-	~sinsp_initializer();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -74,10 +79,25 @@ public:
 	static bool sockinfo_to_str(sinsp_sockinfo* sinfo, scap_fd_type stype, char* targetbuf, uint32_t targetbuf_size, bool resolve = false);
 
 	//
-	// Check if string ends with another 
+	// Check if string ends with another
 	//
-	static bool endswith(const std::string& str, const std::string& ending);
-	static bool endswith(const char *str, const char *ending, uint32_t lstr, uint32_t lend);
+	static inline bool endswith(const std::string& str, const std::string& ending)
+	{
+		if (ending.size() <= str.size())
+		{
+			return (0 == str.compare(str.length() - ending.length(), ending.length(), ending));
+		}
+		return false;
+	}
+
+	static inline bool endswith(const char *str, const char *ending, uint32_t lstr, uint32_t lend)
+	{
+		if (lstr >= lend)
+		{
+			return (0 == memcmp(ending, str + (lstr - lend), lend));
+		}
+		return 0;
+	}
 
 	//
 	// Check if string starts with another
@@ -85,17 +105,17 @@ public:
 	static bool startswith(const std::string& s, const std::string& prefix);
 
 	//
-	// Transform a hex string into bytes 
+	// Transform a hex string into bytes
 	//
 	static bool unhex(const std::vector<char> &hex_chars, std::vector<char> &hex_bytes);
 
 	//
-	// Concatenate two paths and puts the result in "target".
-	// If path2 is relative, the concatenation happens and the result is true.
-	// If path2 is absolute, the concatenation does not happen, target contains path2 and the result is false.
-	// Assumes that path1 is well formed.
+	// Concatenate posix-style path1 and path2 up to max_len in size, normalizing the result.
+	// path1 MUST be '/' terminated and is not sanitized.
+	// If path2 is absolute, the result will be equivalent to path2.
+	// If the result would be too long, the output will contain the string "/PATH_TOO_LONG" instead.
 	//
-	static bool concatenate_paths(char* target, uint32_t targetlen, const char* path1, uint32_t len1, const char* path2, uint32_t len2);
+	static std::string concatenate_paths(std::string_view path1, std::string_view path2);
 
 	//
 	// Determines if an IPv6 address is IPv4-mapped
@@ -107,14 +127,9 @@ public:
 	//
 	static const struct ppm_param_info* find_longest_matching_evt_param(std::string name);
 
-	//
-	// Get the list of filtercheck fields
-	//
-	static void get_filtercheck_fields_info(std::vector<const filter_check_info*>& list);
-
 	static uint64_t get_current_time_ns();
 
-	static bool glob_match(const char *pattern, const char *string);
+	static bool glob_match(const char *pattern, const char *string, const bool& case_insensitive = false);
 
 #ifndef _WIN32
 	//
@@ -122,9 +137,6 @@ public:
 	//
 	static void bt(void);
 #endif // _WIN32
-
-	static bool find_first_env(std::string &out, const std::vector<std::string> &env, const std::vector<std::string> &keys);
-	static bool find_env(std::string &out, const std::vector<std::string> &env, const std::string &key);
 
 	static void split_container_image(const std::string &image,
 					  std::string &hostname,
@@ -134,25 +146,15 @@ public:
 					  std::string &digest,
 					  bool split_repo = true);
 
-	static void parse_suppressed_types(const std::vector<std::string> &supp_strs,
-					   std::vector<uint16_t> *supp_ids);
-
-	static const char* event_name_by_id(uint16_t id);
-
 	static void ts_to_string(uint64_t ts, OUT std::string* res, bool date, bool ns);
 
 	static void ts_to_iso_8601(uint64_t ts, OUT std::string* res);
-
-        // Limited version of iso 8601 time string parsing, that assumes a
-        // timezone of Z for UTC, but does support parsing fractional seconds,
-        // unlike get_epoch_utc_seconds_* below.
-	static bool parse_iso_8601_utc_string(const std::string& time_str, uint64_t &ns);
 
 	//
 	// Convert caps from their numeric representation to a space-separated string list
 	//
 	static std::string caps_to_string(const uint64_t caps);
-	
+
 	static uint64_t get_max_caps();
 };
 
@@ -162,15 +164,12 @@ public:
 
 struct g_invalidchar
 {
-    bool operator()(char c) const
-    {
-	    if(c < -1)
-	    {
-		    return true;
-	    }
-
-	    return !isprint((unsigned)c);
-    }
+	bool operator()(char c) const
+	{
+		// Exclude all non-printable characters and control characters while
+		// including a wide range of languages (emojis, cyrillic, chinese etc)
+		return !(isprint((unsigned)c));
+	}
 };
 
 inline void sanitize_string(std::string &str)
@@ -347,8 +346,8 @@ public:
 			m_avail_list.pop_front();
 		}
 	}
-	void push(OBJ* newentry)
 
+	void push(OBJ* newentry)
 	{
 		m_avail_list.push_front(newentry);
 	}
@@ -364,7 +363,7 @@ public:
 		return head;
 	}
 
-	bool empty()
+	bool empty() const
 	{
 		return m_avail_list.empty();
 	}
@@ -392,7 +391,7 @@ private:
 template<typename T>
 int ci_find_substr(const T& str1, const T& str2, const std::locale& loc = std::locale())
 {
-	typename T::const_iterator it = std::search(str1.begin(), str1.end(),
+	auto it = std::search(str1.begin(), str1.end(),
 		str2.begin(), str2.end(), ci_equal<typename T::value_type>(loc) );
 	if(it != str1.end()) { return it - str1.begin(); }
 	return -1;
@@ -434,7 +433,7 @@ inline void hash_combine(std::size_t &seed, const T& val)
 ///////////////////////////////////////////////////////////////////////////////
 // Log helpers
 ///////////////////////////////////////////////////////////////////////////////
-void sinsp_scap_debug_log_fn(const char* msg);
+void sinsp_scap_log_fn(const char* component, const char* msg, const enum falcosecurity_log_severity sev);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Set operation functions.

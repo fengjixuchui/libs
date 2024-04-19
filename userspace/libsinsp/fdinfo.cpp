@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,50 +20,11 @@ limitations under the License.
 #include <inttypes.h>
 #include <algorithm>
 #endif
-#include "sinsp.h"
-#include "sinsp_int.h"
-#include "scap-int.h"
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
+#include <libscap/scap-int.h>
 
-///////////////////////////////////////////////////////////////////////////////
-// sinsp_fdinfo implementation
-///////////////////////////////////////////////////////////////////////////////
-template<> sinsp_fdinfo_t::sinsp_fdinfo()
-{
-	m_type = SCAP_FD_UNINITIALIZED;
-	m_flags = FLAGS_NONE;
-	m_callbacks = NULL;
-	m_usrstate = NULL;
-	m_name = "";
-	m_name_raw = "";
-	m_oldname = "";
-	m_dev = 0;
-	m_mount_id = 0;
-	m_ino = 0;
-	m_openflags = 0;
-}
-
-template<> void sinsp_fdinfo_t::reset()
-{
-	m_type = SCAP_FD_UNINITIALIZED;
-	m_flags = FLAGS_NONE;
-	delete(m_callbacks);
-	m_callbacks = NULL;
-	m_usrstate = NULL;
-	m_name = "";
-	m_name_raw = "";
-	m_oldname = "";
-	m_dev = 0;
-	m_mount_id = 0;
-	m_ino = 0;
-	m_openflags = 0;
-}
-
-template<> std::string* sinsp_fdinfo_t::tostring()
-{
-	return &m_name;
-}
-
-template<> char sinsp_fdinfo_t::get_typechar()
+char sinsp_fdinfo::get_typechar() const
 {
 	switch(m_type)
 	{
@@ -105,75 +67,83 @@ template<> char sinsp_fdinfo_t::get_typechar()
 		return CHAR_FD_USERFAULTFD;
 	case SCAP_FD_IOURING:
 		return CHAR_FD_IO_URING;
+	case SCAP_FD_MEMFD:
+		return CHAR_FD_MEMFD;
+	case SCAP_FD_PIDFD:
+		return CHAR_FD_PIDFD;
 	default:
 //		ASSERT(false);
 		return '?';
 	}
 }
 
-template<> char* sinsp_fdinfo_t::get_typestring()
+const char* sinsp_fdinfo::get_typestring() const
 {
 	switch(m_type)
 	{
 	case SCAP_FD_FILE_V2:
 	case SCAP_FD_FILE:
-		return (char*)"file";
+		return "file";
 	case SCAP_FD_DIRECTORY:
-		return (char*)"directory";
+		return "directory";
 	case SCAP_FD_IPV4_SOCK:
 	case SCAP_FD_IPV4_SERVSOCK:
-		return (char*)"ipv4";
+		return "ipv4";
 	case SCAP_FD_IPV6_SOCK:
 	case SCAP_FD_IPV6_SERVSOCK:
-		return (char*)"ipv6";
+		return "ipv6";
 	case SCAP_FD_UNIX_SOCK:
-		return (char*)"unix";
+		return "unix";
 	case SCAP_FD_FIFO:
-		return (char*)"pipe";
+		return "pipe";
 	case SCAP_FD_EVENT:
-		return (char*)"event";
+		return "event";
 	case SCAP_FD_SIGNALFD:
-		return (char*)"signalfd";
+		return "signalfd";
 	case SCAP_FD_EVENTPOLL:
-		return (char*)"eventpoll";
+		return "eventpoll";
 	case SCAP_FD_INOTIFY:
-		return (char*)"inotify";
+		return "inotify";
 	case SCAP_FD_TIMERFD:
-		return (char*)"timerfd";
+		return "timerfd";
 	case SCAP_FD_NETLINK:
-		return (char*)"netlink";
+		return "netlink";
 	case SCAP_FD_BPF:
-		return (char*)"bpf";
+		return "bpf";
 	case SCAP_FD_USERFAULTFD:
-		return (char*)"userfaultfd";
+		return "userfaultfd";
 	case SCAP_FD_IOURING:
-		return (char*)"io_uring";
+		return "io_uring";
+	case SCAP_FD_MEMFD:
+		return "memfd";
+	case SCAP_FD_PIDFD:
+		return "pidfd";
 	default:
-		return (char*)"<NA>";
+		return "<NA>";
 	}
 }
 
-template<> std::string sinsp_fdinfo_t::tostring_clean()
+std::string sinsp_fdinfo::tostring_clean() const
 {
-	std::string m_tstr = m_name;
-	sanitize_string(m_tstr);
+	std::string tstr = m_name;
+	sanitize_string(tstr);
 
-	return m_tstr;
+	return tstr;
 }
 
-template<> void sinsp_fdinfo_t::add_filename_raw(const char* rawpath)
+void sinsp_fdinfo::add_filename_raw(std::string_view rawpath)
 {
-	m_name_raw = rawpath;
+	m_name_raw = std::string(rawpath);
 }
 
-template<> void sinsp_fdinfo_t::add_filename(const char* fullpath)
+void sinsp_fdinfo::add_filename(std::string_view fullpath)
 {
-	m_name = fullpath;
+	m_name = std::string(fullpath);
 }
 
-template<> bool sinsp_fdinfo_t::set_net_role_by_guessing(sinsp* inspector,
+bool sinsp_fdinfo::set_net_role_by_guessing(sinsp* inspector,
 										  sinsp_threadinfo* ptinfo,
-										  sinsp_fdinfo_t* pfdinfo,
+										  sinsp_fdinfo* pfdinfo,
 										  bool incoming)
 {
 	//
@@ -196,7 +166,7 @@ template<> bool sinsp_fdinfo_t::set_net_role_by_guessing(sinsp* inspector,
 	}
 
 wildass_guess:
-	if(!(pfdinfo->m_flags & (sinsp_fdinfo_t::FLAGS_ROLE_CLIENT | sinsp_fdinfo_t::FLAGS_ROLE_SERVER)))
+	if(!(pfdinfo->m_flags & (sinsp_fdinfo::FLAGS_ROLE_CLIENT | sinsp_fdinfo::FLAGS_ROLE_SERVER)))
 	{
 		//
 		// We just assume that a server usually starts with a read and a client with a write
@@ -214,7 +184,7 @@ wildass_guess:
 	return true;
 }
 
-template<> scap_l4_proto sinsp_fdinfo_t::get_l4proto()
+scap_l4_proto sinsp_fdinfo::get_l4proto() const
 {
 	scap_fd_type evt_type = m_type;
 
@@ -260,82 +230,61 @@ template<> scap_l4_proto sinsp_fdinfo_t::get_l4proto()
 	}
 }
 
-template<> void sinsp_fdinfo_t::register_event_callback(sinsp_pd_callback_type etype, sinsp_protodecoder* dec)
-{
-	if(this->m_callbacks == NULL)
-	{
-		m_callbacks = new fd_callbacks_info();
-	}
-
-	switch(etype)
-	{
-	case CT_READ:
-		m_callbacks->m_read_callbacks.push_back(dec);
-		break;
-	case CT_WRITE:
-		m_callbacks->m_write_callbacks.push_back(dec);
-		break;
-	default:
-		ASSERT(false);
-		break;
-	}
-
-	return;
-}
-
-template<> void sinsp_fdinfo_t::unregister_event_callback(sinsp_pd_callback_type etype, sinsp_protodecoder* dec)
-{
-	std::vector<sinsp_protodecoder*>::iterator it;
-
-	if(m_callbacks == NULL)
-	{
-		ASSERT(false);
-		return;
-	}
-
-	switch(etype)
-	{
-	case CT_READ:
-		for(it = m_callbacks->m_read_callbacks.begin(); it != m_callbacks->m_read_callbacks.end(); ++it)
-		{
-			if(*it == dec)
-			{
-				m_callbacks->m_read_callbacks.erase(it);
-				return;
-			}
-		}
-
-		break;
-	case CT_WRITE:
-		for(it = m_callbacks->m_write_callbacks.begin(); it != m_callbacks->m_write_callbacks.end(); ++it)
-		{
-			if(*it == dec)
-			{
-				m_callbacks->m_write_callbacks.erase(it);
-				return;
-			}
-		}
-
-		break;
-	default:
-		ASSERT(false);
-		break;
-	}
-
-	return;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // sinsp_fdtable implementation
 ///////////////////////////////////////////////////////////////////////////////
 sinsp_fdtable::sinsp_fdtable(sinsp* inspector)
 {
+	m_tid = 0;
 	m_inspector = inspector;
 	reset_cache();
 }
 
-sinsp_fdinfo_t* sinsp_fdtable::add(int64_t fd, sinsp_fdinfo_t* fdinfo)
+sinsp_fdinfo* sinsp_fdtable::find(int64_t fd)
 {
+	//
+	// Try looking up in our simple cache
+	//
+	if(m_last_accessed_fd != -1 && fd == m_last_accessed_fd)
+	{
+		if (m_inspector != nullptr && m_inspector->get_sinsp_stats_v2())
+		{
+			m_inspector->get_sinsp_stats_v2()->m_n_cached_fd_lookups++;
+		}
+		return m_last_accessed_fdinfo;
+	}
+
+	//
+	// Caching failed, do a real lookup
+	//
+	auto fdit = m_table.find(fd);
+
+	if(fdit == m_table.end())
+	{
+		if (m_inspector != nullptr && m_inspector->get_sinsp_stats_v2())
+		{
+			m_inspector->get_sinsp_stats_v2()->m_n_failed_fd_lookups++;
+		}
+		return NULL;
+	}
+	else
+	{
+		if (m_inspector != nullptr && m_inspector->get_sinsp_stats_v2())
+		{
+			m_inspector->get_sinsp_stats_v2()->m_n_noncached_fd_lookups++;
+		}
+
+		m_last_accessed_fd = fd;
+		m_last_accessed_fdinfo = fdit->second.get();
+		lookup_device(m_last_accessed_fdinfo, fd);
+		return m_last_accessed_fdinfo;
+	}
+}
+
+sinsp_fdinfo* sinsp_fdtable::add(int64_t fd, std::unique_ptr<sinsp_fdinfo> fdinfo)
+{
+	fdinfo->m_fd = fd;
+
 	//
 	// Look for the FD in the table
 	//
@@ -354,11 +303,12 @@ sinsp_fdinfo_t* sinsp_fdtable::add(int64_t fd, sinsp_fdinfo_t* fdinfo)
 			// No entry in the table, this is the normal case
 			//
 			m_last_accessed_fd = -1;
-#ifdef GATHER_INTERNAL_STATS
-			m_inspector->m_stats.m_n_added_fds++;
-#endif
-			std::pair<std::unordered_map<int64_t, sinsp_fdinfo_t>::iterator, bool> insert_res = m_table.emplace(fd, *fdinfo);
-			return &(insert_res.first->second);
+			if (m_inspector != nullptr && m_inspector->get_sinsp_stats_v2())
+			{
+				m_inspector->get_sinsp_stats_v2()->m_n_added_fds++;
+			}
+
+			return m_table.emplace(fd, std::move(fdinfo)).first->second.get();
 		}
 		else
 		{
@@ -370,7 +320,7 @@ sinsp_fdinfo_t* sinsp_fdtable::add(int64_t fd, sinsp_fdinfo_t* fdinfo)
 		//
 		// the fd is already in the table.
 		//
-		if(it->second.m_flags & sinsp_fdinfo_t::FLAGS_CLOSE_IN_PROGRESS)
+		if(it->second->m_flags & sinsp_fdinfo::FLAGS_CLOSE_IN_PROGRESS)
 		{
 			//
 			// Sometimes an FD-creating syscall can be called on an FD that is being closed (i.e
@@ -378,10 +328,10 @@ sinsp_fdinfo_t* sinsp_fdtable::add(int64_t fd, sinsp_fdinfo_t* fdinfo)
 			// If this is the case, mark the new entry so that the successive close exit won't
 			// destroy it.
 			//
-			fdinfo->m_flags &= ~sinsp_fdinfo_t::FLAGS_CLOSE_IN_PROGRESS;
-			fdinfo->m_flags |= sinsp_fdinfo_t::FLAGS_CLOSE_CANCELED;
+			fdinfo->m_flags &= ~sinsp_fdinfo::FLAGS_CLOSE_IN_PROGRESS;
+			fdinfo->m_flags |= sinsp_fdinfo::FLAGS_CLOSE_CANCELED;
 
-			m_table[CANCELED_FD_NUMBER] = it->second;
+			m_table[CANCELED_FD_NUMBER] = it->second->clone();
 		}
 		else
 		{
@@ -401,14 +351,15 @@ sinsp_fdinfo_t* sinsp_fdtable::add(int64_t fd, sinsp_fdinfo_t* fdinfo)
 		//
 		// Replace the fd as a struct copy
 		//
-		it->second.copy(*fdinfo, true);
-		return &(it->second);
+		m_last_accessed_fd = -1;
+		it->second = std::move(fdinfo);
+		return it->second.get();
 	}
 }
 
-void sinsp_fdtable::erase(int64_t fd)
+bool sinsp_fdtable::erase(int64_t fd)
 {
-	std::unordered_map<int64_t, sinsp_fdinfo_t>::iterator fdit = m_table.find(fd);
+	auto fdit = m_table.find(fd);
 
 	if(fd == m_last_accessed_fd)
 	{
@@ -424,17 +375,21 @@ void sinsp_fdtable::erase(int64_t fd)
 		// keep going.
 		//
 		ASSERT(false);
-#ifdef GATHER_INTERNAL_STATS
-		m_inspector->m_stats.m_n_failed_fd_lookups++;
-#endif
+		if (m_inspector != nullptr && m_inspector->get_sinsp_stats_v2())
+		{
+			m_inspector->get_sinsp_stats_v2()->m_n_failed_fd_lookups++;
+		}
+		return false;
 	}
 	else
 	{
 		m_table.erase(fdit);
-#ifdef GATHER_INTERNAL_STATS
-		m_inspector->m_stats.m_n_noncached_fd_lookups++;
-		m_inspector->m_stats.m_n_removed_fds++;
-#endif
+		if (m_inspector != nullptr && m_inspector->get_sinsp_stats_v2())
+		{
+			m_inspector->get_sinsp_stats_v2()->m_n_noncached_fd_lookups++;
+			m_inspector->get_sinsp_stats_v2()->m_n_removed_fds++;
+		}
+		return true;
 	}
 }
 
@@ -443,7 +398,7 @@ void sinsp_fdtable::clear()
 	m_table.clear();
 }
 
-size_t sinsp_fdtable::size()
+size_t sinsp_fdtable::size() const
 {
 	return m_table.size();
 }
@@ -453,22 +408,21 @@ void sinsp_fdtable::reset_cache()
 	m_last_accessed_fd = -1;
 }
 
-void sinsp_fdtable::lookup_device(sinsp_fdinfo_t* fdi, uint64_t fd)
+void sinsp_fdtable::lookup_device(sinsp_fdinfo* fdi, uint64_t fd)
 {
-#ifdef HAS_CAPTURE
 #ifndef _WIN32
-	if(m_inspector->is_offline())
+	if(m_inspector == nullptr || m_inspector->is_offline() ||
+	   (m_inspector->is_plugin() && !m_inspector->is_syscall_plugin()))
 	{
 		return;
 	}
 
-	if(fdi->is_file() && fdi->m_dev == 0 && fdi->m_mount_id != 0)
+	if(m_tid != 0 && m_tid != (uint64_t)-1 && fdi->is_file() && fdi->m_dev == 0 && fdi->m_mount_id != 0)
 	{
 		char procdir[SCAP_MAX_PATH_SIZE];
 		snprintf(procdir, sizeof(procdir), "%s/proc/%ld/", scap_get_host_root(), m_tid);
-		fdi->m_dev = scap_get_device_by_mount_id(m_inspector->m_h, procdir, fdi->m_mount_id);
+		fdi->m_dev = scap_get_device_by_mount_id(m_inspector->get_scap_platform(), procdir, fdi->m_mount_id);
 		fdi->m_mount_id = 0; // don't try again
 	}
 #endif // _WIN32
-#endif // HAS_CAPTURE
 }

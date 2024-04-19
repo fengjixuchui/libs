@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -10,8 +11,13 @@
 
 /* This header should include different definitions according to different architectures.*/
 
-/* PF_KTHREAD flag to mark the kernel threads */
-#define PF_KTHREAD 0x00200000
+/*
+ * Per process flags
+ */
+
+/* `/include/linux/sched.h`  from kernel source tree. */
+#define PF_EXITING		0x00000004	/* Getting shut down */
+#define PF_KTHREAD		0x00200000	/* I am a kernel thread */
 
 /*=============================== ARCH SPECIFIC ===========================*/
 
@@ -31,6 +37,13 @@
  * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/s390/include/asm/thread_info.h#L101
  */
 #define _TIF_31BIT (1 << 16)
+
+#elif defined(__TARGET_ARCH_powerpc)
+
+/* See here for definition:
+ * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/powerpc/include/asm/thread_info.h#L126
+ */
+#define _TIF_32BIT (1 << 20)
 
 #endif
 
@@ -164,6 +177,15 @@
 #define O_DIRECT 0200000   /* direct disk access hint - currently ignored */
 #define O_LARGEFILE 0400000
 
+#elif defined(__TARGET_ARCH_powerpc)
+
+/* `/arch/powerpc/include/uapi/asm/fcntl.h` from kernel source tree. */
+
+#define O_DIRECTORY      040000	/* must be a directory */
+#define O_NOFOLLOW      0100000	/* don't follow links */
+#define O_LARGEFILE     0200000
+#define O_DIRECT	0400000	/* direct disk access hint */
+
 #endif
 
 #define O_NOATIME 01000000
@@ -281,9 +303,11 @@
 
 #define MAP_32BIT 0x40 /* only give out 32bit addresses */
 
+#if defined(__TARGET_ARCH_powerpc)
 /* `/arch/mips/include/uapi/asm/mman.h` from kernel source tree. */
 
 #define MAP_RENAME 0x020 /* Assign page to file */
+#endif
 
 /* `/include/uapi/asm-generic/mman.h` from kernel source tree. */
 
@@ -548,6 +572,17 @@
 #define MAY_READ 0x00000004
 
 //////////////////////////
+// umount options
+//////////////////////////
+
+/* `include/linux/fs.h` from kernel source tree. */
+
+#define MNT_FORCE       0x00000001      /* Attempt to forcibily umount */
+#define MNT_DETACH      0x00000002      /* Just detach from the tree */
+#define MNT_EXPIRE      0x00000004      /* Mark for expiry */
+#define UMOUNT_NOFOLLOW 0x00000008      /* Don't follow symlink on umount */
+
+//////////////////////////
 // lseek whence
 //////////////////////////
 
@@ -559,6 +594,14 @@
 #define SEEK_DATA 3 /* seek to the next data */
 #define SEEK_HOLE 4 /* seek to the next hole */
 #define SEEK_MAX SEEK_HOLE
+
+//////////////////////////
+// file mode flags
+//////////////////////////
+
+/* `include/linux/fs.h` from kernel source tree. */
+
+#define FMODE_CREATED		(/*(__force fmode_t) */0x100000)
 
 //////////////////////////
 // flock flags
@@ -733,6 +776,18 @@
 #define MCL_CURRENT 1 /* lock all current mappings */
 #define MCL_FUTURE 2  /* lock all future mappings */
 #define MCL_ONFAULT 4 /* lock all pages that are faulted in */
+
+//////////////////////////
+// memfd_create flags
+//////////////////////////
+#  define MFD_CLOEXEC 1U
+#  define MFD_ALLOW_SEALING 2U
+#  define MFD_HUGETLB 4U
+
+//////////////////////////
+// pidfd_open flags
+//////////////////////////
+# define PIDFD_NONBLOCK O_NONBLOCK  
 
 /*=============================== FLAGS ===========================*/
 
@@ -1238,6 +1293,8 @@
 
 #define cap_raised(c, flag) ((c).cap[CAP_TO_INDEX(flag)] & CAP_TO_MASK(flag))
 
+#define cap_raised___v6_3(c, flag) (((c).val & (1 << (flag))) != 0)
+
 /*=============================== CAPABILITIES ===========================*/
 
 /*=============================== DIRECTORY_NOTIFICATIONS ===========================*/
@@ -1511,5 +1568,16 @@
 
 /*==================================== PRCTL OPTIONS ================================*/
 
+/*==================================== FINIT   FLAGS ================================*/
+
+#define MODULE_INIT_IGNORE_MODVERSIONS 1
+#define MODULE_INIT_IGNORE_VERMAGIC    2
+#define MODULE_INIT_COMPRESSED_FILE    4
+/*==================================== FINIT   FLAGS ================================*/
+
+/*==================================== OVERLAY FLAGS ================================*/
+#define DCACHE_DISCONNECTED 0x20
+#define OVL_E_UPPER_ALIAS      0
+/*==================================== OVERLAY FLAGS ================================*/
 
 #endif /* __MISSING_DEFINITIONS_H__ */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,12 +16,12 @@ int BPF_PROG(io_uring_register_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, IO_URING_REGISTER_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, IO_URING_REGISTER_E_SIZE, PPME_SYSCALL_IO_URING_REGISTER_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_IO_URING_REGISTER_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -43,12 +44,12 @@ int BPF_PROG(io_uring_register_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, IO_URING_REGISTER_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, IO_URING_REGISTER_X_SIZE, PPME_SYSCALL_IO_URING_REGISTER_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_IO_URING_REGISTER_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -56,12 +57,12 @@ int BPF_PROG(io_uring_register_x,
 	ringbuf__store_s64(&ringbuf, ret);
 
 	/* Parameter 2: fd (type: PT_FD) */
-	s32 fd = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/* Parameter 3: opcode (type: PT_ENUMFLAGS16) */
-	u32 opcode = (u32)extract__syscall_argument(regs, 1);
-	ringbuf__store_u16(&ringbuf, (u16)io_uring_register_opcodes_to_scap(opcode));
+	uint32_t opcode = (uint32_t)extract__syscall_argument(regs, 1);
+	ringbuf__store_u16(&ringbuf, (uint16_t)io_uring_register_opcodes_to_scap(opcode));
 
 	/* Parameter 4: arg (type: PT_UINT64) */
 	/* Here we push directly a pointer to userspace. `arg` is
@@ -71,7 +72,7 @@ int BPF_PROG(io_uring_register_x,
 	ringbuf__store_u64(&ringbuf, arg);
 
 	/* Parameter 5: nr_args (type: PT_UINT32) */
-	u32 nr_args = (u32)extract__syscall_argument(regs, 3);
+	uint32_t nr_args = (uint32_t)extract__syscall_argument(regs, 3);
 	ringbuf__store_u32(&ringbuf, nr_args);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

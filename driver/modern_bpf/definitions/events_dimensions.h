@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -80,7 +81,7 @@
 #define TGKILL_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define TKILL_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint8_t) + PARAM_LEN * 2
 #define TKILL_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
-#define SECCOMP_E_SIZE HEADER_LEN + sizeof(uint64_t) + PARAM_LEN
+#define SECCOMP_E_SIZE HEADER_LEN + sizeof(uint64_t) * 2 + PARAM_LEN * 2
 #define SECCOMP_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define PTRACE_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint16_t) + PARAM_LEN * 2
 #define CAPSET_E_SIZE HEADER_LEN
@@ -92,7 +93,7 @@
 #define ACCEPT_E_SIZE HEADER_LEN
 #define ACCEPT4_E_SIZE HEADER_LEN + sizeof(uint32_t) + PARAM_LEN
 #define BIND_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
-#define LISTEN_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
+#define LISTEN_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(int32_t) + PARAM_LEN * 2
 #define LISTEN_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define CLONE_E_SIZE HEADER_LEN
 #define CLONE3_E_SIZE HEADER_LEN
@@ -104,7 +105,7 @@
 #define PIPE_E_SIZE HEADER_LEN
 #define PIPE_X_SIZE HEADER_LEN + sizeof(int64_t) * 3 + sizeof(uint64_t) + PARAM_LEN * 4
 #define BPF_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
-#define BPF_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
+#define BPF_X_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(int32_t) + PARAM_LEN * 2
 #define FLOCK_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
 #define FLOCK_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define IOCTL_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint64_t) * 2 + PARAM_LEN * 3
@@ -136,9 +137,9 @@
 #define SETSID_E_SIZE HEADER_LEN
 #define SETSID_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define SETRLIMIT_E_SIZE HEADER_LEN + sizeof(uint8_t) + PARAM_LEN
-#define SETRLIMIT_X_SIZE HEADER_LEN + sizeof(int64_t) * 3 + PARAM_LEN * 3
+#define SETRLIMIT_X_SIZE HEADER_LEN + sizeof(int64_t) * 3 + sizeof(uint8_t) + PARAM_LEN * 4
 #define PRLIMIT64_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint8_t) + PARAM_LEN * 2
-#define PRLIMIT64_X_SIZE HEADER_LEN + sizeof(int64_t) * 5 + PARAM_LEN * 5
+#define PRLIMIT64_X_SIZE HEADER_LEN + sizeof(int64_t) * 6 + sizeof(uint8_t) + PARAM_LEN * 7
 #define GETSOCKOPT_E_SIZE HEADER_LEN
 #define SETSOCKOPT_E_SIZE HEADER_LEN
 #define RECVMSG_E_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
@@ -147,7 +148,7 @@
 #define PREAD64_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + sizeof(uint64_t) + PARAM_LEN * 3
 #define RECVFROM_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + PARAM_LEN * 2
 #define FCNTL_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint8_t) + PARAM_LEN * 2
-#define FCNTL_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
+#define FCNTL_X_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(int64_t) + sizeof(uint8_t) + PARAM_LEN * 3
 #define SHUTDOWN_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint8_t) + PARAM_LEN * 2
 #define SHUTDOWN_X_SIZE HEADER_LEN + sizeof(int64_t) + PARAM_LEN
 #define FSCONFIG_E_SIZE HEADER_LEN
@@ -236,9 +237,21 @@
 #define SIGNALFD4_E_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint32_t) + 2 * PARAM_LEN
 #define SIGNALFD4_X_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint16_t) + 2 * PARAM_LEN
 #define PRCTL_E_SIZE HEADER_LEN
+#define MEMFD_CREATE_E_SIZE HEADER_LEN
+#define PIDFD_GETFD_E_SIZE HEADER_LEN
+#define PIDFD_GETFD_X_SIZE HEADER_LEN + sizeof(int64_t) * 3 + sizeof(uint32_t) + 4 * PARAM_LEN
+#define PIDFD_OPEN_E_SIZE HEADER_LEN
+#define PIDFD_OPEN_X_SIZE HEADER_LEN + sizeof(int64_t) * 2 + sizeof(uint32_t) + 3 * PARAM_LEN
+#define INIT_MODULE_E_SIZE HEADER_LEN
+#define FINIT_MODULE_E_SIZE HEADER_LEN
+#define MKNOD_E_SIZE HEADER_LEN
+#define MKNODAT_E_SIZE HEADER_LEN
+#define NEWFSTATAT_E_SIZE HEADER_LEN
+#define PROCESS_VM_READV_E_SIZE HEADER_LEN
+#define PROCESS_VM_WRITEV_E_SIZE HEADER_LEN
+#define DELETE_MODULE_E_SIZE HEADER_LEN
 
 /* Generic tracepoints events. */
-#define PROC_EXIT_SIZE HEADER_LEN + sizeof(int64_t) * 2 + sizeof(uint8_t) * 2 + PARAM_LEN * 4
 #define SCHED_SWITCH_SIZE HEADER_LEN + sizeof(int64_t) + sizeof(uint64_t) * 2 + sizeof(uint32_t) * 3 + PARAM_LEN * 6
 #define PAGE_FAULT_SIZE HEADER_LEN + sizeof(uint64_t) * 2 + sizeof(uint32_t) + PARAM_LEN * 3
 #define SIGNAL_DELIVER_SIZE HEADER_LEN + sizeof(int64_t) * 2 + sizeof(uint8_t) + PARAM_LEN * 3

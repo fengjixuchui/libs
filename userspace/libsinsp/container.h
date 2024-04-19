@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,21 +22,21 @@ limitations under the License.
 #include <memory>
 #include <unordered_map>
 
-#include "scap.h"
+#include <libscap/scap.h>
 
-#include "event.h"
-#include "container_info.h"
+#include <libsinsp/event.h>
+#include <libsinsp/container_info.h>
 
-#if !defined(_WIN32) && !defined(CYGWING_AGENT) && defined(HAS_CAPTURE) && !defined(MINIMAL_BUILD)
+#if !defined(_WIN32) && !defined(MINIMAL_BUILD) && !defined(__EMSCRIPTEN__)
 #include <curl/curl.h>
 #include <curl/easy.h>
 #include <curl/multi.h>
 #endif
 
-#include "container_engine/container_cache_interface.h"
-#include "container_engine/container_engine_base.h"
-#include "container_engine/sinsp_container_type.h"
-#include "mutex.h"
+#include <libsinsp/container_engine/container_cache_interface.h>
+#include <libsinsp/container_engine/container_engine_base.h>
+#include <libsinsp/container_engine/sinsp_container_type.h>
+#include <libsinsp/mutex.h>
 
 class sinsp_dumper;
 
@@ -44,6 +45,7 @@ class sinsp_container_manager :
 {
 public:
 	using map_ptr_t = libsinsp::ConstMutexGuard<std::unordered_map<std::string, sinsp_container_info::ptr_t>>;
+	using map_mut_ptr_t = libsinsp::MutexGuard<std::unordered_map<std::string, sinsp_container_info::ptr_t>>;
 
 	/**
 	 * Due to how the container manager is architected, it makes it difficult
@@ -58,13 +60,19 @@ public:
 	                        const std::string static_name = "",
 	                        const std::string static_image = "");
 
-	virtual ~sinsp_container_manager();
+	virtual ~sinsp_container_manager() = default;
 
 	/**
 	 * @brief Get the whole container map (read-only)
 	 * @return the map of container_id -> shared_ptr<container_info>
 	 */
 	map_ptr_t get_containers() const;
+
+	inline map_mut_ptr_t get_containers()
+	{
+		return m_containers.lock();
+	}
+
 	bool remove_inactive_containers();
 
 	/**
@@ -213,9 +221,21 @@ public:
 		auto engine_lookup = container_lookups->second.find(ctype);
 		return engine_lookup == container_lookups->second.end();
 	}
-private:
+
+	/**
+	* \brief get the list of container engines in the inspector
+	*
+	* @return a pointer to the list of container engines
+	*/
+	std::list<std::shared_ptr<libsinsp::container_engine::container_engine_base>>* get_container_engines() {
+		return &m_container_engines;
+	}
+	uint64_t m_last_flush_time_ns;
 	std::string container_to_json(const sinsp_container_info& container_info);
-	bool container_to_sinsp_event(const std::string& json, sinsp_evt* evt, std::shared_ptr<sinsp_threadinfo> tinfo);
+
+
+private:
+	bool container_to_sinsp_event(const std::string& json, sinsp_evt* evt, std::shared_ptr<sinsp_threadinfo> tinfo, char* scap_err);
 	std::string get_docker_env(const Json::Value &env_vars, const std::string &mti);
 
 	std::list<std::shared_ptr<libsinsp::container_engine::container_engine_base>> m_container_engines;
@@ -224,7 +244,6 @@ private:
 	sinsp* m_inspector;
 	libsinsp::Mutex<std::unordered_map<std::string, std::shared_ptr<const sinsp_container_info>>> m_containers;
 	std::unordered_map<std::string, std::unordered_map<sinsp_container_type, sinsp_container_lookup::state>> m_lookups;
-	uint64_t m_last_flush_time_ns;
 	std::list<new_container_cb> m_new_callbacks;
 	std::list<remove_container_cb> m_remove_callbacks;
 
@@ -236,7 +255,5 @@ private:
 	std::string m_static_name;
 	std::string m_static_image;
 	uint64_t m_container_engine_mask;
-
-	friend class test_helper;
 };
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 #
 # Copyright (C) 2023 The Falco Authors.
 #
@@ -31,8 +32,9 @@ set(LIBSCAP_TESTS_INCLUDE
   PRIVATE
   "${GTEST_INCLUDE}"
   "${CMAKE_CURRENT_SOURCE_DIR}" # for test helpers <helpers/...>
-  "${CMAKE_SOURCE_DIR}/userspace/libscap" # this is for libscap includes
-  "${CMAKE_SOURCE_DIR}/driver" # for the event_stats.h file
+  "${LIBS_DIR}"
+  "${LIBS_DIR}/userspace"
+  "${PROJECT_BINARY_DIR}"
   "${CMAKE_CURRENT_BINARY_DIR}" # used to include `libscap_test_var.h`
 )
 
@@ -46,27 +48,25 @@ set(LIBSCAP_TESTS_LIBRARIES
 	scap
 )
 
-# Add `gcov` to needed libraries
-if (CMAKE_BUILD_TYPE STREQUAL "Coverage")
-	list(APPEND LIBSCAP_TESTS_LIBRARIES gcov)
-endif()
-
 set(LIBSCAP_TESTS_DEPENDENCIES
 	gtest
 	scap
 )
 
-# Generic libscap test suite, always compiled
-file(GLOB_RECURSE GENERIC_TEST_SUITE "${CMAKE_CURRENT_SOURCE_DIR}/test_suites/generic/*.cpp")
-set(LIBSCAP_TESTS_SOURCES ${GENERIC_TEST_SUITE})
-
-# Test suite asserting against tables
-file(GLOB_RECURSE TABLES_TEST_SUITE "${CMAKE_CURRENT_SOURCE_DIR}/test_suites/tables/*.cpp")
-set(LIBSCAP_TESTS_SOURCES ${TABLES_TEST_SUITE})
+# Test suite asserting against pure userspace components
+file(GLOB_RECURSE USERSPACE_TEST_SUITE "${CMAKE_CURRENT_SOURCE_DIR}/test_suites/userspace/*.cpp")
+set(LIBSCAP_TESTS_SOURCES ${USERSPACE_TEST_SUITE})
 
 # Helpers are not engine-specific so we always include them
 file(GLOB_RECURSE LIBSCAP_TESTS_UTILS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/helpers/*cpp")
 list(APPEND LIBSCAP_TESTS_SOURCES ${LIBSCAP_TESTS_UTILS_SOURCES})
+
+# Linux specific tests
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+	file(GLOB_RECURSE LINUX_TEST_SUITE "${CMAKE_CURRENT_SOURCE_DIR}/test_suites/userspace/linux/*.cpp")
+	list(APPEND LIBSCAP_TEST_SOURCES ${LINUX_TEST_SUITE})
+	list(APPEND LIBSCAP_TESTS_LIBRARIES scap_engine_util)
+endif()
 
 # Engine-specific tests
 if(BUILD_DRIVER)
@@ -96,11 +96,14 @@ if(BUILD_LIBSCAP_GVISOR)
 endif()
 
 # Summary logs
-message(STATUS "LIBSCAP_TESTS_SOURCES: ${LIBSCAP_TESTS_SOURCES}")
-message(STATUS "LIBSCAP_TESTS_INCLUDE: ${LIBSCAP_TESTS_INCLUDE}")
-message(STATUS "LIBSCAP_TESTS_LIBRARIES: ${LIBSCAP_TESTS_LIBRARIES}")
-message(STATUS "LIBSCAP_TESTS_DEPENDENCIES: ${LIBSCAP_TESTS_DEPENDENCIES}")
+set(LIBSCAP_UNIT_TESTS_PREFIX "[LIBSCAP UNIT TESTS]")
+message(STATUS "${LIBSCAP_UNIT_TESTS_PREFIX} LIBSCAP_TESTS_SOURCES: ${LIBSCAP_TESTS_SOURCES}")
+message(STATUS "${LIBSCAP_UNIT_TESTS_PREFIX} LIBSCAP_TESTS_INCLUDE: ${LIBSCAP_TESTS_INCLUDE}")
+message(STATUS "${LIBSCAP_UNIT_TESTS_PREFIX} LIBSCAP_TESTS_LIBRARIES: ${LIBSCAP_TESTS_LIBRARIES}")
+message(STATUS "${LIBSCAP_UNIT_TESTS_PREFIX} LIBSCAP_TESTS_DEPENDENCIES: ${LIBSCAP_TESTS_DEPENDENCIES}")
 
+add_compile_options(${FALCOSECURITY_LIBS_USERSPACE_COMPILE_FLAGS})
+add_link_options(${FALCOSECURITY_LIBS_USERSPACE_LINK_FLAGS})
 add_executable(libscap_test ${LIBSCAP_TESTS_SOURCES})
 target_include_directories(libscap_test ${LIBSCAP_TESTS_INCLUDE})
 target_link_libraries(libscap_test ${LIBSCAP_TESTS_LIBRARIES})

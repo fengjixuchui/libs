@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,7 +16,7 @@ limitations under the License.
 */
 
 #include "util.h"
-#include <sinsp.h>
+#include <libsinsp/sinsp.h>
 
 //
 // Get the string representation of a ppm_event_category
@@ -50,7 +51,7 @@ std::string get_event_category_name(ppm_event_category category)
 //
 // Get the string representation of a ppm_event_type
 //
-std::string get_event_type_name(sinsp& inspector, sinsp_evt* ev)
+std::string get_event_type_name(sinsp_evt *ev)
 {
 	uint16_t type = ev->get_type();
 	if (type >= PPM_EVENT_MAX)
@@ -62,7 +63,6 @@ std::string get_event_type_name(sinsp& inspector, sinsp_evt* ev)
 		return scap_get_event_info_table()[type].name;
 	}
 
-	sinsp_evt_param *parinfo = ev->get_param(0);
-	uint16_t ppm_sc = *(uint16_t *)parinfo->m_val;
+	uint16_t ppm_sc = ev->get_param(0)->as<uint16_t>();
 	return scap_get_ppm_sc_name((ppm_sc_code)ppm_sc);
 }

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,11 +16,11 @@ limitations under the License.
 
 */
 
-#include "sinsp.h"
-#include "sinsp_int.h"
-#include "filter.h"
-#include "filterchecks.h"
-#include "eventformatter.h"
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
+#include <libsinsp/filter.h>
+#include <libsinsp/filterchecks.h>
+#include <libsinsp/eventformatter.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 // rawstring_check implementation
@@ -38,7 +39,7 @@ sinsp_evt_formatter::sinsp_evt_formatter(sinsp* inspector,
 	: m_inspector(inspector),
 	  m_available_checks(available_checks)
 {
-	gen_event_formatter::output_format of = gen_event_formatter::OF_NORMAL;
+	output_format of = sinsp_evt_formatter::OF_NORMAL;
 
 	if(m_inspector->get_buffer_format() == sinsp_evt::PF_JSON
 	   || m_inspector->get_buffer_format() == sinsp_evt::PF_JSONEOLS
@@ -46,23 +47,13 @@ sinsp_evt_formatter::sinsp_evt_formatter(sinsp* inspector,
 	   || m_inspector->get_buffer_format() == sinsp_evt::PF_JSONHEXASCII
 	   || m_inspector->get_buffer_format() == sinsp_evt::PF_JSONBASE64)
 	{
-		of = gen_event_formatter::OF_JSON;
+		of = sinsp_evt_formatter::OF_JSON;
 	}
 
 	set_format(of, fmt);
 }
 
-sinsp_evt_formatter::~sinsp_evt_formatter()
-{
-	uint32_t j;
-
-	for(j = 0; j < m_chks_to_free.size(); j++)
-	{
-		delete m_chks_to_free[j];
-	}
-}
-
-void sinsp_evt_formatter::set_format(gen_event_formatter::output_format of, const std::string& fmt)
+void sinsp_evt_formatter::set_format(output_format of, const std::string& fmt)
 {
 	uint32_t j;
 	uint32_t last_nontoken_str_start = 0;
@@ -105,10 +96,10 @@ void sinsp_evt_formatter::set_format(gen_event_formatter::output_format of, cons
 
 			if(last_nontoken_str_start != j)
 			{
-				rawstring_check* newtkn = new rawstring_check(lfmt.substr(last_nontoken_str_start, j - last_nontoken_str_start));
-				m_tokens.emplace_back(std::make_pair("", newtkn));
+				auto newtkn = std::make_unique<rawstring_check>(lfmt.substr(last_nontoken_str_start, j - last_nontoken_str_start));
+				m_tokens.emplace_back(std::make_pair("", newtkn.get()));
 				m_tokenlens.push_back(0);
-				m_chks_to_free.push_back(newtkn);
+				m_checks.push_back(std::move(newtkn));
 			}
 
 			if(j == lfmtlen - 1)
@@ -147,16 +138,14 @@ void sinsp_evt_formatter::set_format(gen_event_formatter::output_format of, cons
 				}
 			}
 
-			sinsp_filter_check* chk = m_available_checks.new_filter_check_from_fldname(std::string(cfmt + j + 1),
+			auto chk = m_available_checks.new_filter_check_from_fldname(std::string(cfmt + j + 1),
 				m_inspector,
 				false);
 
-			if(chk == NULL)
+			if(chk == nullptr)
 			{
 				throw sinsp_exception("invalid formatting token " + std::string(cfmt + j + 1));
 			}
-
-			m_chks_to_free.push_back(chk);
 
 			const char * fstart = cfmt + j + 1;
 			uint32_t fsize = chk->parse_field_name(fstart, true, false);
@@ -164,8 +153,10 @@ void sinsp_evt_formatter::set_format(gen_event_formatter::output_format of, cons
 			j += fsize;
 			ASSERT(j <= lfmt.length());
 
-			m_tokens.emplace_back(std::make_pair(std::string(fstart, fsize), chk));
+			m_tokens.emplace_back(std::make_pair(std::string(fstart, fsize), chk.get()));
 			m_tokenlens.push_back(toklen);
+
+			m_checks.push_back(std::move(chk));
 
 			last_nontoken_str_start = j + 1;
 		}
@@ -173,9 +164,9 @@ void sinsp_evt_formatter::set_format(gen_event_formatter::output_format of, cons
 
 	if(last_nontoken_str_start != j)
 	{
-		sinsp_filter_check * chk = new rawstring_check(lfmt.substr(last_nontoken_str_start, j - last_nontoken_str_start));
-		m_tokens.emplace_back(std::make_pair("", chk));
-		m_chks_to_free.push_back(chk);
+		auto chk = std::make_unique<rawstring_check>(lfmt.substr(last_nontoken_str_start, j - last_nontoken_str_start));
+		m_tokens.emplace_back(std::make_pair("", chk.get()));
+		m_checks.emplace_back(std::move(chk));
 		m_tokenlens.push_back(0);
 	}
 }
@@ -221,24 +212,33 @@ bool sinsp_evt_formatter::resolve_tokens(sinsp_evt *evt, std::map<std::string,st
 	return retval;
 }
 
-bool sinsp_evt_formatter::get_field_values(gen_event *gevt, std::map<std::string, std::string> &fields)
+bool sinsp_evt_formatter::get_field_values(sinsp_evt *evt, std::map<std::string, std::string> &fields)
 {
-	sinsp_evt *evt = static_cast<sinsp_evt *>(gevt);
-
 	return resolve_tokens(evt, fields);
 }
 
-gen_event_formatter::output_format sinsp_evt_formatter::get_output_format()
+void sinsp_evt_formatter::get_field_names(std::vector<std::string> &fields)
+{
+	for(size_t i = 0; i < m_tokens.size(); i++)
+	{
+		if(m_tokens[i].first == "")
+		{
+			continue;
+		}
+
+		fields.emplace_back(m_tokens[i].first);
+	}
+}
+
+sinsp_evt_formatter::output_format sinsp_evt_formatter::get_output_format()
 {
 	return m_output_format;
 }
 
-bool sinsp_evt_formatter::tostring_withformat(gen_event* gevt, std::string &output, gen_event_formatter::output_format of)
+bool sinsp_evt_formatter::tostring_withformat(sinsp_evt* evt, std::string &output, output_format of)
 {
 	bool retval = true;
 	const filtercheck_field_info* fi;
-
-	sinsp_evt *evt = static_cast<sinsp_evt *>(gevt);
 
 	uint32_t j = 0;
 	output.clear();
@@ -315,68 +315,26 @@ bool sinsp_evt_formatter::tostring_withformat(gen_event* gevt, std::string &outp
 	return retval;
 }
 
-bool sinsp_evt_formatter::tostring(gen_event* gevt, std::string &output)
+bool sinsp_evt_formatter::tostring(sinsp_evt* evt, std::string& res)
 {
-	return tostring_withformat(gevt, output, m_output_format);
-}
-
-bool sinsp_evt_formatter::tostring(sinsp_evt* evt, OUT std::string* res)
-{
-	return tostring_withformat(evt, *res, m_output_format);
-}
-
-sinsp_evt_formatter_cache::sinsp_evt_formatter_cache(sinsp *inspector)
-	: m_inspector(inspector)
-{
-}
-
-sinsp_evt_formatter_cache::~sinsp_evt_formatter_cache()
-{
-}
-
-std::shared_ptr<sinsp_evt_formatter>& sinsp_evt_formatter_cache::get_cached_formatter(std::string &format)
-{
-	auto it = m_formatter_cache.lower_bound(format);
-
-	if(it == m_formatter_cache.end() ||
-	   it->first != format)
-	{
-		it = m_formatter_cache.emplace_hint(it,
-						    std::make_pair(format, std::make_shared<sinsp_evt_formatter>(m_inspector, format)));
-	}
-
-	return it->second;
-}
-
-bool sinsp_evt_formatter_cache::resolve_tokens(sinsp_evt *evt, std::string &format, std::map<std::string,std::string>& values)
-{
-	return get_cached_formatter(format)->resolve_tokens(evt, values);
-}
-
-bool sinsp_evt_formatter_cache::tostring(sinsp_evt *evt, std::string &format, OUT std::string *res)
-{
-	return get_cached_formatter(format)->tostring(evt, *res);
+	return tostring_withformat(evt, res, m_output_format);
 }
 
 sinsp_evt_formatter_factory::sinsp_evt_formatter_factory(sinsp *inspector, filter_check_list &available_checks)
 	: m_inspector(inspector),
 	  m_available_checks(available_checks),
-	  m_output_format(gen_event_formatter::OF_NORMAL)
+	  m_output_format(sinsp_evt_formatter::OF_NORMAL)
 {
 }
 
-sinsp_evt_formatter_factory::~sinsp_evt_formatter_factory()
-{
-}
-
-void sinsp_evt_formatter_factory::set_output_format(gen_event_formatter::output_format of)
+void sinsp_evt_formatter_factory::set_output_format(sinsp_evt_formatter::output_format of)
 {
 	m_formatters.clear();
 
 	m_output_format = of;
 }
 
-std::shared_ptr<gen_event_formatter> sinsp_evt_formatter_factory::create_formatter(const std::string &format)
+std::shared_ptr<sinsp_evt_formatter> sinsp_evt_formatter_factory::create_formatter(const std::string &format)
 {
 	auto it = m_formatters.find(format);
 
@@ -385,7 +343,7 @@ std::shared_ptr<gen_event_formatter> sinsp_evt_formatter_factory::create_formatt
 		return it->second;
 	}
 
-	std::shared_ptr<gen_event_formatter> ret;
+	std::shared_ptr<sinsp_evt_formatter> ret;
 
 	ret.reset(new sinsp_evt_formatter(m_inspector, m_available_checks));
 

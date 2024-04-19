@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,16 +24,16 @@ limitations under the License.
 #include <sys/mman.h>
 
 #define SCAP_HANDLE_T struct kmod_engine
-#include "kmod.h"
-#include "scap.h"
-#include "driver_config.h"
-#include "../../driver/ppm_ringbuffer.h"
-#include "scap-int.h"
-#include "scap_engine_util.h"
-#include "ringbuffer/ringbuffer.h"
-#include "strlcpy.h"
-#include "strerror.h"
-#include "../../driver/ppm_tp.h"
+#include <libscap/engine/kmod/kmod.h>
+#include <libscap/scap.h>
+#include <driver_config.h>
+#include <driver/ppm_ringbuffer.h>
+#include <libscap/scap-int.h>
+#include <libscap/scap_engine_util.h>
+#include <libscap/ringbuffer/ringbuffer.h>
+#include <libscap/strl.h>
+#include <libscap/strerror.h>
+#include <driver/ppm_tp.h>
 
 //#define NDEBUG
 #include <assert.h>
@@ -52,6 +53,8 @@ static const char * const kmod_kernel_counters_stats_names[] = {
 	[KMOD_N_DROPS_BUFFER_DIR_FILE_EXIT] = "n_drops_buffer_dir_file_exit",
 	[KMOD_N_DROPS_BUFFER_OTHER_INTEREST_ENTER] = "n_drops_buffer_other_interest_enter",
 	[KMOD_N_DROPS_BUFFER_OTHER_INTEREST_EXIT] = "n_drops_buffer_other_interest_exit",
+	[KMOD_N_DROPS_BUFFER_CLOSE_EXIT] = "n_drops_buffer_close_exit",
+	[KMOD_N_DROPS_BUFFER_PROC_EXIT] = "n_drops_buffer_proc_exit",
 	[KMOD_N_DROPS_PAGE_FAULTS] = "n_drops_page_faults",
 	[KMOD_N_DROPS_BUG] = "n_drops_bug",
 	[KMOD_N_DROPS] = "n_drops",
@@ -152,7 +155,6 @@ static int32_t mark_attached_prog(struct kmod_engine* handle, uint32_t ioctl_op,
 	struct scap_device_set *devset = &handle->m_dev_set;
 	if(ioctl(devset->m_devs[0].m_fd, ioctl_op, tp))
 	{
-		ASSERT(false);
 		return scap_errprintf(handle->m_lasterr, errno,
 				      "%s(%d) failed for tp %d",
 				      __FUNCTION__, ioctl_op, tp);
@@ -165,7 +167,6 @@ static int32_t mark_syscall(struct kmod_engine* handle, uint32_t ioctl_op, int s
 	struct scap_device_set *devset = &handle->m_dev_set;
 	if(ioctl(devset->m_devs[0].m_fd, ioctl_op, syscall_id))
 	{
-		ASSERT(false);
 		return scap_errprintf(handle->m_lasterr, errno,
 						"%s(%d) failed for syscall %d",
 						__FUNCTION__, ioctl_op, syscall_id);
@@ -191,6 +192,21 @@ static int enforce_sc_set(struct kmod_engine* handle)
 	bool sys_exit = false;
 	bool sched_prog_fork = false;
 	bool sched_prog_exec = false;
+
+	/* We need to enable the socketcall under the hood in case these syscalls are not
+	 * defined on the system but we just have the socketcall code.
+	 * See https://github.com/falcosecurity/libs/pull/1128
+     */
+	if(sc_set[PPM_SC_RECV] ||
+	   sc_set[PPM_SC_SEND] ||
+	   sc_set[PPM_SC_ACCEPT])
+	{
+		sc_set[PPM_SC_SOCKETCALL] = true;
+	}
+	else
+	{
+		sc_set[PPM_SC_SOCKETCALL] = false;
+	}
 
 	/* Enforce interesting syscalls */
 	for(int sc = 0; sc < PPM_SC_MAX; sc++)
@@ -319,7 +335,7 @@ int32_t scap_kmod_init(scap_t *handle, scap_open_args *oargs)
 	ncpus = sysconf(_SC_NPROCESSORS_CONF);
 	if(ncpus == -1)
 	{
-		return scap_errprintf(handle->m_lasterr, errno, "_SC_NPROCESSORS_CONF");
+		return scap_errprintf(handle->m_lasterr, errno, "cannot obtain the number of available CPUs from '_SC_NPROCESSORS_CONF'");
 	}
 
 	//
@@ -328,7 +344,7 @@ int32_t scap_kmod_init(scap_t *handle, scap_open_args *oargs)
 	ndevs = sysconf(_SC_NPROCESSORS_ONLN);
 	if(ndevs == -1)
 	{
-		return scap_errprintf(handle->m_lasterr, errno, "_SC_NPROCESSORS_ONLN");
+		return scap_errprintf(handle->m_lasterr, errno, "cannot obtain the number of online CPUs from '_SC_NPROCESSORS_ONLN'");
 	}
 
 	rc = devset_init(&engine.m_handle->m_dev_set, ndevs, handle->m_lasterr);
@@ -343,14 +359,17 @@ int32_t scap_kmod_init(scap_t *handle, scap_open_args *oargs)
 	mapped_len = single_buffer_dim * 2;
 
 	struct scap_device_set *devset = &engine.m_handle->m_dev_set;
-	for(uint32_t j = 0, all_scanned_devs = 0; j < devset->m_ndevs && all_scanned_devs < ncpus; ++all_scanned_devs)
+	uint32_t online_idx = 0;
+	// devset->m_ndevs = online CPUs in the system.
+	// ncpus = available CPUs in the system.
+	for(uint32_t cpu_idx = 0; online_idx < devset->m_ndevs && cpu_idx < ncpus; ++cpu_idx)
 	{
-		struct scap_device *dev = &devset->m_devs[j];
+		struct scap_device *dev = &devset->m_devs[online_idx];
 
 		//
 		// Open the device
 		//
-		snprintf(filename, sizeof(filename), "%s/dev/" DRIVER_DEVICE_NAME "%d", scap_get_host_root(), all_scanned_devs);
+		snprintf(filename, sizeof(filename), "%s/dev/" DRIVER_DEVICE_NAME "%d", scap_get_host_root(), cpu_idx);
 
 		if((dev->m_fd = open(filename, O_RDWR | O_SYNC)) < 0)
 		{
@@ -472,21 +491,25 @@ int32_t scap_kmod_init(scap_t *handle, scap_open_args *oargs)
 		}
 		dev->m_bufinfo_size = sizeof(struct ppm_ring_buffer_info);
 
-		++j;
+		++online_idx;
 	}
-
-	/* Here we are covering the case in which some syscalls don't have an associated ppm_sc
-	 * and so we cannot set them as (un)interesting. For this reason, we default them to 0.
-	 * Please note this is an extra check since our ppm_sc should already cover all possible syscalls.
-	 */
-	for(int i = 0; i < SYSCALL_TABLE_SIZE; i++)
+	
+	// Check that we parsed all online CPUs
+	if(online_idx != devset->m_ndevs)
 	{
-		rc = mark_syscall(engine.m_handle, PPM_IOCTL_DISABLE_SYSCALL, i);
-		if(rc != SCAP_SUCCESS)
-		{
-			return rc;
-		}
-	}	
+		return scap_errprintf(handle->m_lasterr, 0, "mismatch, processors online after the 'for' loop: %d, '_SC_NPROCESSORS_ONLN' before the 'for' loop: %d", online_idx, devset->m_ndevs);
+	}
+	
+	// Check that no CPUs were hotplugged during the for loop
+	uint32_t final_ndevs = sysconf(_SC_NPROCESSORS_ONLN);
+	if(final_ndevs == -1)
+	{
+		return scap_errprintf(handle->m_lasterr, errno, "cannot obtain the number of online CPUs from '_SC_NPROCESSORS_ONLN' to check against the previous value");
+	}
+	if (online_idx != final_ndevs) 
+	{
+		return scap_errprintf(handle->m_lasterr, 0, "mismatch, processors online after the 'for' loop: %d, '_SC_NPROCESSORS_ONLN' after the 'for' loop: %d", online_idx, final_ndevs);
+	}
 
 	/* Store interesting sc codes */
 	memcpy(&engine.m_handle->curr_sc_set, &oargs->ppm_sc_of_interest, sizeof(interesting_ppm_sc_set));
@@ -503,9 +526,10 @@ int32_t scap_kmod_close(struct scap_engine_handle engine)
 	return SCAP_SUCCESS;
 }
 
-int32_t scap_kmod_next(struct scap_engine_handle engine, OUT scap_evt** pevent, OUT uint16_t* pcpuid)
+int32_t scap_kmod_next(struct scap_engine_handle engine, OUT scap_evt **pevent, OUT uint16_t *pdevid,
+		       OUT uint32_t *pflags)
 {
-	return ringbuffer_next(&engine.m_handle->m_dev_set, pevent, pcpuid);
+	return ringbuffer_next(&engine.m_handle->m_dev_set, pevent, pdevid, pflags);
 }
 
 uint32_t scap_kmod_get_n_devs(struct scap_engine_handle engine)
@@ -543,6 +567,8 @@ int32_t scap_kmod_get_stats(struct scap_engine_handle engine, scap_stats* stats)
 		stats->n_drops_buffer_dir_file_exit += dev->m_bufinfo->n_drops_buffer_dir_file_exit;
 		stats->n_drops_buffer_other_interest_enter += dev->m_bufinfo->n_drops_buffer_other_interest_enter;
 		stats->n_drops_buffer_other_interest_exit += dev->m_bufinfo->n_drops_buffer_other_interest_exit;
+		stats->n_drops_buffer_close_exit += dev->m_bufinfo->n_drops_buffer_close_exit;
+		stats->n_drops_buffer_proc_exit += dev->m_bufinfo->n_drops_buffer_proc_exit;
 		stats->n_drops_pf += dev->m_bufinfo->n_drops_pf;
 		stats->n_drops += dev->m_bufinfo->n_drops_buffer +
 				  dev->m_bufinfo->n_drops_pf;
@@ -552,13 +578,13 @@ int32_t scap_kmod_get_stats(struct scap_engine_handle engine, scap_stats* stats)
 	return SCAP_SUCCESS;
 }
 
-const struct scap_stats_v2* scap_kmod_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
+const struct metrics_v2* scap_kmod_get_stats_v2(struct scap_engine_handle engine, uint32_t flags, OUT uint32_t* nstats, OUT int32_t* rc)
 {
 	struct kmod_engine *handle = engine.m_handle;
 	struct scap_device_set *devset = &handle->m_dev_set;
 	uint32_t j;
 	*nstats = 0;
-	scap_stats_v2* stats = handle->m_stats;
+	metrics_v2* stats = handle->m_stats;
 
 	if (!stats)
 	{
@@ -566,15 +592,17 @@ const struct scap_stats_v2* scap_kmod_get_stats_v2(struct scap_engine_handle eng
 		return NULL;
 	}
 
-	if ((flags & PPM_SCAP_STATS_KERNEL_COUNTERS))
+	if ((flags & METRICS_V2_KERNEL_COUNTERS))
 	{
 		/* KERNEL SIDE STATS COUNTERS */
 		for(uint32_t stat = 0; stat < KMOD_MAX_KERNEL_COUNTERS_STATS; stat++)
 		{
-			stats[stat].type = STATS_VALUE_TYPE_U64;
-			stats[stat].flags = PPM_SCAP_STATS_KERNEL_COUNTERS;
+			stats[stat].type = METRIC_VALUE_TYPE_U64;
+			stats[stat].flags = METRICS_V2_KERNEL_COUNTERS;
+			stats[stat].unit = METRIC_VALUE_UNIT_COUNT;
+			stats[stat].metric_type = METRIC_VALUE_METRIC_TYPE_MONOTONIC;
 			stats[stat].value.u64 = 0;
-			strlcpy(stats[stat].name, kmod_kernel_counters_stats_names[stat], STATS_NAME_MAX);
+			strlcpy(stats[stat].name, kmod_kernel_counters_stats_names[stat], METRIC_NAME_MAX);
 		}
 
 		for(j = 0; j < devset->m_ndevs; j++)
@@ -594,6 +622,8 @@ const struct scap_stats_v2* scap_kmod_get_stats_v2(struct scap_engine_handle eng
 			stats[KMOD_N_DROPS_BUFFER_DIR_FILE_EXIT].value.u64 += dev->m_bufinfo->n_drops_buffer_dir_file_exit;
 			stats[KMOD_N_DROPS_BUFFER_OTHER_INTEREST_ENTER].value.u64 += dev->m_bufinfo->n_drops_buffer_other_interest_enter;
 			stats[KMOD_N_DROPS_BUFFER_OTHER_INTEREST_EXIT].value.u64 += dev->m_bufinfo->n_drops_buffer_other_interest_exit;
+			stats[KMOD_N_DROPS_BUFFER_CLOSE_EXIT].value.u64 += dev->m_bufinfo->n_drops_buffer_close_exit;
+			stats[KMOD_N_DROPS_BUFFER_PROC_EXIT].value.u64 += dev->m_bufinfo->n_drops_buffer_proc_exit;
 			stats[KMOD_N_DROPS_PAGE_FAULTS].value.u64 += dev->m_bufinfo->n_drops_pf;
 			stats[KMOD_N_DROPS].value.u64 += dev->m_bufinfo->n_drops_buffer +
 					dev->m_bufinfo->n_drops_pf;
@@ -629,6 +659,22 @@ int32_t scap_kmod_stop_capture(struct scap_engine_handle engine)
 int32_t scap_kmod_start_capture(struct scap_engine_handle engine)
 {
 	struct kmod_engine* handle = engine.m_handle;
+	int32_t rc = 0;
+	/* Here we are covering the case in which some syscalls don't have an associated ppm_sc
+	 * and so we cannot set them as (un)interesting. For this reason, we default them to 0.
+	 * Please note this is an extra check since our ppm_sc should already cover all possible syscalls.
+	 * Ideally we should do this only once, but right now in our code we don't have a "right" place to do it.
+	 * We need to move it, if `scap_start_capture` will be called frequently in our flow, right now in live mode, it
+	 * should be called only once...
+	 */
+	for(int i = 0; i < SYSCALL_TABLE_SIZE; i++)
+	{
+		rc = mark_syscall(handle, PPM_IOCTL_DISABLE_SYSCALL, i);
+		if(rc != SCAP_SUCCESS)
+		{
+			return rc;
+		}
+	}
 	handle->capturing = true;
 	return enforce_sc_set(handle);
 }
@@ -650,28 +696,10 @@ static int32_t scap_kmod_set_dropping_mode(struct scap_engine_handle engine, int
 
 		if(ioctl(devset->m_devs[0].m_fd, request, sampling_ratio))
 		{
-			ASSERT(false);
 			return scap_errprintf(engine.m_handle->m_lasterr, errno, "%s, request %d for sampling ratio %u",
 					      __FUNCTION__, request, sampling_ratio);
 		}
 	}
-	return SCAP_SUCCESS;
-}
-
-int32_t scap_kmod_enable_tracers_capture(struct scap_engine_handle engine)
-{
-	struct scap_device_set *devset = &engine.m_handle->m_dev_set;
-	if(devset->m_ndevs)
-	{
-		{
-			if(ioctl(devset->m_devs[0].m_fd, PPM_IOCTL_SET_TRACERS_CAPTURE))
-			{
-				ASSERT(false);
-				return scap_errprintf(engine.m_handle->m_lasterr, errno, "%s failed", __FUNCTION__);
-			}
-		}
-	}
-
 	return SCAP_SUCCESS;
 }
 
@@ -693,7 +721,6 @@ int32_t scap_kmod_set_snaplen(struct scap_engine_handle engine, uint32_t snaplen
 	//
 	if(ioctl(devset->m_devs[0].m_fd, PPM_IOCTL_SET_SNAPLEN, snaplen))
 	{
-		ASSERT(false);
 		return scap_errprintf(engine.m_handle->m_lasterr, errno, "scap_set_snaplen failed");
 	}
 
@@ -718,7 +745,6 @@ int32_t scap_kmod_handle_dropfailed(struct scap_engine_handle engine, bool enabl
 	int req = enable ? PPM_IOCTL_ENABLE_DROPFAILED : PPM_IOCTL_DISABLE_DROPFAILED;
 	if(ioctl(engine.m_handle->m_dev_set.m_devs[0].m_fd, req))
 	{
-		ASSERT(false);
 		return scap_errprintf(engine.m_handle->m_lasterr, errno, "scap_enable_dynamic_snaplen failed");
 	}
 	return SCAP_SUCCESS;
@@ -732,7 +758,6 @@ int32_t scap_kmod_handle_dynamic_snaplen(struct scap_engine_handle engine, bool 
 	int req = enable ? PPM_IOCTL_ENABLE_DYNAMIC_SNAPLEN : PPM_IOCTL_DISABLE_DYNAMIC_SNAPLEN;
 	if(ioctl(engine.m_handle->m_dev_set.m_devs[0].m_fd, req))
 	{
-		ASSERT(false);
 		return scap_errprintf(engine.m_handle->m_lasterr, errno, "scap_enable_dynamic_snaplen failed");
 	}
 	return SCAP_SUCCESS;
@@ -742,7 +767,6 @@ int32_t scap_kmod_get_n_tracepoint_hit(struct scap_engine_handle engine, long* r
 {
 	if(ioctl(engine.m_handle->m_dev_set.m_devs[0].m_fd, PPM_IOCTL_GET_N_TRACEPOINT_HIT, ret))
 	{
-		ASSERT(false);
 		return scap_errprintf(engine.m_handle->m_lasterr, errno, "scap_get_n_tracepoint_hit failed");
 	}
 
@@ -762,7 +786,6 @@ int32_t scap_kmod_set_fullcapture_port_range(struct scap_engine_handle engine, u
 	//
 	if(ioctl(devset->m_devs[0].m_fd, PPM_IOCTL_SET_FULLCAPTURE_PORT_RANGE, arg))
 	{
-		ASSERT(false);
 		return scap_errprintf(engine.m_handle->m_lasterr, errno, "scap_set_fullcapture_port_range failed");
 	}
 
@@ -791,7 +814,6 @@ int32_t scap_kmod_set_statsd_port(struct scap_engine_handle engine, const uint16
 	//
 	if(ioctl(devset->m_devs[0].m_fd, PPM_IOCTL_SET_STATSD_PORT, port))
 	{
-		ASSERT(false);
 		return scap_errprintf(engine.m_handle->m_lasterr,
 				      errno, "scap_set_statsd_port: ioctl failed");
 	}
@@ -835,12 +857,6 @@ static int32_t configure(struct scap_engine_handle engine, enum scap_setting set
 		{
 			return scap_kmod_start_dropping_mode(engine, arg1);
 		}
-	case SCAP_TRACERS_CAPTURE:
-		if(arg1 == 0)
-		{
-			return unsupported_config(engine, "Tracers cannot be disabled once enabled");
-		}
-		return scap_kmod_enable_tracers_capture(engine);
 	case SCAP_SNAPLEN:
 		return scap_kmod_set_snaplen(engine, arg1);
 	case SCAP_PPM_SC_MASK:
@@ -904,7 +920,6 @@ static int32_t scap_kmod_get_vpid(struct scap_engine_handle engine, uint64_t pid
 
 	if(*vpid == -1)
 	{
-		ASSERT(false);
 		return scap_errprintf(kmod_engine->m_lasterr, errno, "ioctl to get vpid failed");
 	}
 
@@ -918,7 +933,6 @@ static int32_t scap_kmod_get_vtid(struct scap_engine_handle engine, uint64_t tid
 
 	if(*vtid == -1)
 	{
-		ASSERT(false);
 		return scap_errprintf(kmod_engine->m_lasterr, errno, "ioctl to get vtid failed");
 	}
 
@@ -931,7 +945,6 @@ int32_t scap_kmod_getpid_global(struct scap_engine_handle engine, int64_t* pid, 
 	*pid = ioctl(kmod_engine->m_dev_set.m_devs[0].m_fd, PPM_IOCTL_GET_CURRENT_PID);
 	if(*pid == -1)
 	{
-		ASSERT(false);
 		return scap_errprintf(kmod_engine->m_lasterr, errno, "ioctl to get pid failed");
 	}
 
@@ -948,9 +961,15 @@ uint64_t scap_kmod_get_schema_version(struct scap_engine_handle engine)
 	return engine.m_handle->m_schema_version;
 }
 
+const struct scap_linux_vtable scap_kmod_linux_vtable = {
+	.get_vpid = scap_kmod_get_vpid,
+	.get_vtid = scap_kmod_get_vtid,
+	.getpid_global = scap_kmod_getpid_global,
+	.get_threadlist = scap_kmod_get_threadlist,
+};
+
 struct scap_vtable scap_kmod_engine = {
 	.name = KMOD_ENGINE,
-	.mode = SCAP_MODE_LIVE,
 	.savefile_ops = NULL,
 
 	.alloc_handle = alloc_handle,
@@ -966,10 +985,6 @@ struct scap_vtable scap_kmod_engine = {
 	.get_n_tracepoint_hit = scap_kmod_get_n_tracepoint_hit,
 	.get_n_devs = scap_kmod_get_n_devs,
 	.get_max_buf_used = scap_kmod_get_max_buf_used,
-	.get_threadlist = scap_kmod_get_threadlist,
-	.get_vpid = scap_kmod_get_vpid,
-	.get_vtid = scap_kmod_get_vtid,
-	.getpid_global = scap_kmod_getpid_global,
 	.get_api_version = scap_kmod_get_api_version,
 	.get_schema_version = scap_kmod_get_schema_version,
 };

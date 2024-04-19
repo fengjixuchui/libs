@@ -1,14 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright (C) 2023 The Falco Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 include(protobuf)
 include(jsoncpp)
-
-include_directories(${LIBSCAP_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR} ${JSONCPP_INCLUDE})
 
 find_package(Threads)
 
 set(scap_engine_gvisor_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/parsers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fillers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gvisor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scap_gvisor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/scap_gvisor_platform.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/runsc.cpp
 )
 
@@ -41,6 +57,10 @@ add_custom_command(
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+if(USE_BUNDLED_JSONCPP)
+    add_dependencies(scap jsoncpp)
+endif()
+
 if (BUILD_SHARED_LIBS)
     # Trying to build a shared scap_engine_gvisor will result in circular
     # dependencies, so just add our sources to scap.
@@ -50,23 +70,33 @@ if (BUILD_SHARED_LIBS)
     add_library(scap_engine_gvisor_o OBJECT
         ${scap_engine_gvisor_sources}
         ${scap_engine_gvisor_generated_sources}
-        ${JSONCPP_LIB_SRC}
     )
     set_property(TARGET scap_engine_gvisor_o PROPERTY POSITION_INDEPENDENT_CODE ON)
 
+    add_dependencies(scap_engine_gvisor_o uthash)
     add_dependencies(scap scap_engine_gvisor_o)
     target_sources(scap PRIVATE $<TARGET_OBJECTS:scap_engine_gvisor_o>)
 else()
     add_library(scap_engine_gvisor
         ${scap_engine_gvisor_sources}
         ${scap_engine_gvisor_generated_sources}
-        ${JSONCPP_LIB_SRC})
+    )
 
+    add_dependencies(scap_engine_gvisor uthash)
     target_link_libraries(scap_engine_gvisor
+    PRIVATE
+        scap
+        scap_platform_util
+        scap_error
         ${CMAKE_THREAD_LIBS_INIT}
         ${PROTOBUF_LIB}
         ${JSONCPP_LIB}
-        scap
     )
+
+    target_include_directories(scap_engine_gvisor
+        PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
     set_scap_target_properties(scap_engine_gvisor)
 endif()

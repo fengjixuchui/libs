@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,14 +31,16 @@ struct iovec {
 #endif
 
 #define SCAP_HANDLE_T struct savefile_engine
-#include "savefile.h"
-#include "scap.h"
-#include "scap-int.h"
-#include "scap_savefile.h"
-#include "scap_reader.h"
-#include "../noop/noop.h"
+#include <libscap/engine/savefile/savefile.h>
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
+#include <libscap/scap_platform.h>
+#include <libscap/scap_savefile.h>
+#include <libscap/engine/savefile/savefile_platform.h>
+#include <libscap/engine/savefile/scap_reader.h>
+#include <libscap/engine/noop/noop.h>
 
-#include "strlcpy.h"
+#include <libscap/strl.h>
 
 //
 // Read the section header block
@@ -83,7 +86,6 @@ static int32_t scap_read_proclist(scap_reader_t* r, uint32_t block_length, uint3
 	size_t padding_len;
 	uint16_t stlen;
 	uint32_t padding;
-	int32_t uth_status = SCAP_SUCCESS;
 	uint32_t toread;
 	int fseekres;
 
@@ -101,19 +103,25 @@ static int32_t scap_read_proclist(scap_reader_t* r, uint32_t block_length, uint3
 		tinfo.env_len = 0;
 		tinfo.vtid = -1;
 		tinfo.vpid = -1;
-		tinfo.cgroups_len = 0;
+		tinfo.cgroups.len = 0;
 		tinfo.filtered_out = 0;
 		tinfo.root[0] = 0;
 		tinfo.sid = -1;
 		tinfo.vpgid = -1;
 		tinfo.clone_ts = 0;
+		tinfo.pidns_init_start_ts = 0;
 		tinfo.tty = 0;
 		tinfo.exepath[0] = 0;
-		tinfo.loginuid = -1;
+		tinfo.loginuid = UINT32_MAX;
 		tinfo.exe_writable = false;
 		tinfo.cap_inheritable = 0;
 		tinfo.cap_permitted = 0;
 		tinfo.cap_effective = 0;
+		tinfo.exe_upper_layer = false;
+		tinfo.exe_ino = 0;
+		tinfo.exe_ino_ctime = 0;
+		tinfo.exe_ino_mtime = 0;
+		tinfo.exe_from_memfd = false;
 
 		//
 		// len
@@ -511,11 +519,11 @@ static int32_t scap_read_proclist(scap_reader_t* r, uint32_t block_length, uint3
 					snprintf(error, SCAP_LASTERR_SIZE, "invalid cgroupslen %d", stlen);
 					return SCAP_FAILURE;
 				}
-				tinfo.cgroups_len = stlen;
+				tinfo.cgroups.len = stlen;
 
 				subreadsize += readsize;
 
-				readsize = r->read(r, tinfo.cgroups, stlen);
+				readsize = r->read(r, tinfo.cgroups.path, stlen);
 				CHECK_READ_SIZE_ERR(readsize, stlen, error);
 
 				subreadsize += readsize;
@@ -562,12 +570,64 @@ static int32_t scap_read_proclist(scap_reader_t* r, uint32_t block_length, uint3
 		//    ...
 		// }
 
-		//
-		// loginuid
-		//
-		if(sub_len && (subreadsize + sizeof(int32_t)) <= sub_len)
+		// In 0.10.x libs tag, 2 fields were added to the scap file producer,
+		// written in the middle of the proclist entry, breaking forward compatibility
+		// for old scap file readers.
+		// Detect this hacky behavior, and manage it.
+		// Added fields:
+		// * exe_upper_layer
+		// * exe_ino
+		// * exe_ino_ctime
+		// * exe_ino_mtime
+		// * pidns_init_start_ts (in the middle)
+		// * tty (in the middle)
+		// So, to check if we need to enable the "pre-0.10.x hack",
+		// we need to check if remaining data to be read is <= than
+		// sum of sizes for fields existent in libs < 0.10.x, ie:
+		// * loginuid (4B)
+		// * exe_writable (1B)
+		// * cap_inheritable (8B)
+		// * cap_permitted (8B)
+		// * cap_effective (8B)
+		// TOTAL: 29B
+		bool pre_0_10_0 = false;
+		if (sub_len - subreadsize <= 29)
 		{
-			readsize = r->read(r, &(tinfo.loginuid), sizeof(int32_t));
+			pre_0_10_0 = true;
+		}
+
+		if (!pre_0_10_0)
+		{
+			// Ok we are in libs >= 0.10.x; read the fields that
+			// were added interleaved in libs 0.10.0
+
+			//
+			// pidns_init_start_ts
+			//
+			if(sub_len && (subreadsize + sizeof(uint64_t)) <= sub_len)
+			{
+				readsize = r->read(r, &(tinfo.pidns_init_start_ts), sizeof(uint64_t));
+				CHECK_READ_SIZE_ERR(readsize, sizeof(uint64_t), error);
+				subreadsize += readsize;
+			}
+
+			//
+			// tty
+			//
+			if(sub_len && (subreadsize + sizeof(uint32_t)) <= sub_len)
+			{
+				readsize = r->read(r, &(tinfo.tty), sizeof(uint32_t));
+				CHECK_READ_SIZE_ERR(readsize, sizeof(uint32_t), error);
+				subreadsize += readsize;
+			}
+		}
+
+		//
+		// loginuid (auid)
+		//
+		if(sub_len && (subreadsize + sizeof(uint32_t)) <= sub_len)
+		{
+			readsize = r->read(r, &(tinfo.loginuid), sizeof(uint32_t));
 			CHECK_READ_SIZE_ERR(readsize, sizeof(uint32_t), error);
 			subreadsize += readsize;
 		}
@@ -606,37 +666,52 @@ static int32_t scap_read_proclist(scap_reader_t* r, uint32_t block_length, uint3
 			subreadsize += readsize;
 		}
 
+		// exe_upper_layer
+		if(sub_len && (subreadsize + sizeof(uint8_t)) <= sub_len)
+		{
+			readsize = r->read(r, &(tinfo.exe_upper_layer), sizeof(uint8_t));
+			CHECK_READ_SIZE_ERR(readsize, sizeof(uint8_t), error);
+			subreadsize += readsize;
+		}
+
+		// exe_ino
+		if(sub_len && (subreadsize + sizeof(uint64_t)) <= sub_len)
+		{
+			readsize = r->read(r, &(tinfo.exe_ino), sizeof(uint64_t));
+			CHECK_READ_SIZE_ERR(readsize, sizeof(uint64_t), error);
+			subreadsize += readsize;
+		}
+
+		// exe_ino_ctime
+		if(sub_len && (subreadsize + sizeof(uint64_t)) <= sub_len)
+		{
+			readsize = r->read(r, &(tinfo.exe_ino_ctime), sizeof(uint64_t));
+			CHECK_READ_SIZE_ERR(readsize, sizeof(uint64_t), error);
+			subreadsize += readsize;
+		}
+
+		// exe_ino_mtime
+		if(sub_len && (subreadsize + sizeof(uint64_t)) <= sub_len)
+		{
+			readsize = r->read(r, &(tinfo.exe_ino_mtime), sizeof(uint64_t));
+			CHECK_READ_SIZE_ERR(readsize, sizeof(uint64_t), error);
+			subreadsize += readsize;
+		}
+
+		// exe_from_memfd
+		if(sub_len && (subreadsize + sizeof(uint8_t)) <= sub_len)
+		{
+			uint8_t exe_from_memfd = 0;
+			readsize = r->read(r, &exe_from_memfd, sizeof(uint8_t));
+			CHECK_READ_SIZE_ERR(readsize, sizeof(uint8_t), error);
+			subreadsize += readsize;
+			tinfo.exe_from_memfd = (exe_from_memfd != 0);
+		}
+
 		//
 		// All parsed. Add the entry to the table, or fire the notification callback
 		//
-		if(proclist->m_proc_callback == NULL)
-		{
-			//
-			// All parsed. Allocate the new entry and copy the temp one into into it.
-			//
-			struct scap_threadinfo *ntinfo = (scap_threadinfo *)malloc(sizeof(scap_threadinfo));
-			if(ntinfo == NULL)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (fd1)");
-				return SCAP_FAILURE;
-			}
-
-			// Structure copy
-			*ntinfo = tinfo;
-
-			HASH_ADD_INT64(proclist->m_proclist, tid, ntinfo);
-			if(uth_status != SCAP_SUCCESS)
-			{
-				free(ntinfo);
-				snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (fd2)");
-				return SCAP_FAILURE;
-			}
-		}
-		else
-		{
-			proclist->m_proc_callback(
-				proclist->m_proc_callback_context, tinfo.tid, &tinfo, NULL);
-		}
+		proclist->m_proc_callback(proclist->m_proc_callback_context, error, tinfo.tid, &tinfo, NULL, NULL);
 
 		if(sub_len && subreadsize != sub_len)
 		{
@@ -736,8 +811,8 @@ static int32_t scap_read_iflist(scap_reader_t* r, uint32_t block_length, uint32_
 
 		if(block_type != IL_BLOCK_TYPE_V2)
 		{
-			iftype = *(uint16_t *)pif;
-			ifnamlen = *(uint16_t *)(pif + 2);
+			memcpy(&iftype, pif, sizeof(iftype));
+			memcpy(&ifnamlen, pif + 2, sizeof(ifnamlen));
 
 			if(iftype == SCAP_II_IPV4)
 			{
@@ -758,16 +833,16 @@ static int32_t scap_read_iflist(scap_reader_t* r, uint32_t block_length, uint32_
 			else
 			{
 				snprintf(error, SCAP_LASTERR_SIZE, "trace file has corrupted interface list(1)");
-				ASSERT(false);
 				res = SCAP_FAILURE;
 				goto scap_read_iflist_error;
 			}
 		}
 		else
 		{
-			entrysize = *(uint32_t *)pif + sizeof(uint32_t);
-			iftype = *(uint16_t *)(pif + 4);
-			ifnamlen = *(uint16_t *)(pif + 4 + 2);
+			memcpy(&entrysize, pif, sizeof(entrysize));
+			entrysize += sizeof(uint32_t);
+			memcpy(&iftype, pif + 4, sizeof(iftype));
+			memcpy(&ifnamlen, pif + 4 + 2, sizeof(ifnamlen));
 		}
 
 		if(toread < entrysize)
@@ -790,7 +865,6 @@ static int32_t scap_read_iflist(scap_reader_t* r, uint32_t block_length, uint32_
 		}
 		else
 		{
-			ASSERT(false);
 			snprintf(error, SCAP_LASTERR_SIZE, "unknown interface type %d", (int)iftype);
 			res = SCAP_FAILURE;
 			goto scap_read_iflist_error;
@@ -867,13 +941,13 @@ static int32_t scap_read_iflist(scap_reader_t* r, uint32_t block_length, uint32_
 
 		if(block_type == IL_BLOCK_TYPE_V2)
 		{
-			entrysize = *(uint32_t *)pif;
+			memcpy(&entrysize, pif, sizeof(entrysize));
 			totreadsize += sizeof(uint32_t);
 			pif += sizeof(uint32_t);
 		}
 
-		iftype = *(uint16_t *)pif;
-		ifnamlen = *(uint16_t *)(pif + 2);
+		memcpy(&iftype, pif, sizeof(iftype));
+		memcpy(&ifnamlen, pif + 2, sizeof(ifnamlen));
 
 		if(ifnamlen >= SCAP_MAX_PATH_SIZE)
 		{
@@ -1058,7 +1132,7 @@ static int32_t scap_read_userlist(scap_reader_t* r, uint32_t block_length, uint3
 
 	//
 	// If the list of users was already allocated for this handle (for example because this is
-	// not the first interface list block), free it
+	// not the first user list block), free it
 	//
 	if((*userlist_p) != NULL)
 	{
@@ -1478,14 +1552,18 @@ static uint32_t scap_fd_read_from_disk(scap_fdinfo *fdi, size_t *nbytes, uint32_
 	case SCAP_FD_BPF:
 	case SCAP_FD_USERFAULTFD:
 	case SCAP_FD_IOURING:
+	case SCAP_FD_MEMFD:
+	case SCAP_FD_PIDFD:
 		res = scap_fd_read_fname_from_disk(fdi->info.fname, nbytes, r, error);
 		break;
 	case SCAP_FD_UNKNOWN:
 		ASSERT(false);
 		break;
 	default:
-		snprintf(error, SCAP_LASTERR_SIZE, "error reading the fd info from file, wrong fd type %u", (uint32_t)fdi->type);
-		return SCAP_FAILURE;
+		// unknown fd type, possibly coming from a newer library version
+		fdi->type = SCAP_FD_UNSUPPORTED;
+		snprintf(fdi->info.fname, sizeof(fdi->info.fname), "unknown-type:[%d]", (int)type);
+		break;
 	}
 
 	if(sub_len && *nbytes != sub_len)
@@ -1511,19 +1589,16 @@ static uint32_t scap_fd_read_from_disk(scap_fdinfo *fdi, size_t *nbytes, uint32_
 }
 
 //
-// Parse a process list block
+// Parse a file descriptor list block
 //
 static int32_t scap_read_fdlist(scap_reader_t* r, uint32_t block_length, uint32_t block_type, struct scap_proclist* proclist, char* error)
 {
 	size_t readsize;
 	size_t totreadsize = 0;
 	size_t padding_len;
-	struct scap_threadinfo *tinfo;
 	scap_fdinfo fdi;
-	scap_fdinfo *nfdi;
 	//  uint16_t stlen;
 	uint64_t tid;
-	int32_t uth_status = SCAP_SUCCESS;
 	uint32_t padding;
 
 	//
@@ -1533,18 +1608,6 @@ static int32_t scap_read_fdlist(scap_reader_t* r, uint32_t block_length, uint32_
 	CHECK_READ_SIZE_ERR(readsize, sizeof(tid), error);
 	totreadsize += readsize;
 
-	if(proclist->m_proc_callback == NULL)
-	{
-		//
-		// Identify the process descriptor
-		//
-		HASH_FIND_INT64(proclist->m_proclist, &tid, tinfo);
-	}
-	else
-	{
-		tinfo = NULL;
-	}
-
 	while(((int32_t)block_length - (int32_t)totreadsize) >= 4)
 	{
 		if(scap_fd_read_from_disk(&fdi, &readsize, block_type, r, error) != SCAP_SUCCESS)
@@ -1552,50 +1615,10 @@ static int32_t scap_read_fdlist(scap_reader_t* r, uint32_t block_length, uint32_
 			return SCAP_FAILURE;
 		}
 		totreadsize += readsize;
-
 		//
 		// Add the entry to the table, or fire the notification callback
 		//
-		if(proclist->m_proc_callback == NULL)
-		{
-			if(tinfo == NULL)
-			{
-				//
-				// We have the fdinfo but no associated tid, skip it
-				//
-				continue;
-			}
-
-			//
-			// Parsed successfully. Allocate the new entry and copy the temp one into into it.
-			//
-			nfdi = (scap_fdinfo *)malloc(sizeof(scap_fdinfo));
-			if(nfdi == NULL)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (fd1)");
-				return SCAP_FAILURE;
-			}
-
-			// Structure copy
-			*nfdi = fdi;
-
-			ASSERT(tinfo != NULL);
-
-			HASH_ADD_INT64(tinfo->fdlist, fd, nfdi);
-			if(uth_status != SCAP_SUCCESS)
-			{
-				free(nfdi);
-				snprintf(error, SCAP_LASTERR_SIZE, "process table allocation error (fd2)");
-				return SCAP_FAILURE;
-			}
-		}
-		else
-		{
-			ASSERT(tinfo == NULL);
-
-			proclist->m_proc_callback(
-				proclist->m_proc_callback_context, tid, NULL, &fdi);
-		}
+		proclist->m_proc_callback(proclist->m_proc_callback_context, error, tid, NULL, &fdi, NULL);
 	}
 
 	//
@@ -1818,7 +1841,7 @@ static int32_t scap_read_init(struct savefile_engine *handle, scap_reader_t* r, 
 //
 // Read an event from disk
 //
-static int32_t next(struct scap_engine_handle engine, scap_evt **pevent, uint16_t *pcpuid)
+static int32_t next(struct scap_engine_handle engine, scap_evt **pevent, uint16_t *pdevid, uint32_t *pflags)
 {
 	struct savefile_engine* handle = engine.m_handle;
 	block_header bh;
@@ -1928,16 +1951,16 @@ static int32_t next(struct scap_engine_handle engine, scap_evt **pevent, uint16_
 		//
 		// EVF_BLOCK_TYPE has 32 bits of flags
 		//
-		*pcpuid = *(uint16_t *)handle->m_reader_evt_buf;
+		*pdevid = *(uint16_t *)handle->m_reader_evt_buf;
 
 		if(bh.block_type == EVF_BLOCK_TYPE || bh.block_type == EVF_BLOCK_TYPE_V2 || bh.block_type == EVF_BLOCK_TYPE_V2_LARGE)
 		{
-			handle->m_last_evt_dump_flags = *(uint32_t*)(handle->m_reader_evt_buf + sizeof(uint16_t));
+			memcpy(pflags, handle->m_reader_evt_buf + sizeof(uint16_t), sizeof(uint32_t));
 			*pevent = (struct ppm_evt_hdr *)(handle->m_reader_evt_buf + sizeof(uint16_t) + sizeof(uint32_t));
 		}
 		else
 		{
-			handle->m_last_evt_dump_flags = 0;
+			*pflags = 0;
 			*pevent = (struct ppm_evt_hdr *)(handle->m_reader_evt_buf + sizeof(uint16_t));
 		}
 
@@ -2038,6 +2061,52 @@ void scap_savefile_fseek(struct scap_engine_handle engine, uint64_t off)
 	reader->seek(reader, off, SEEK_SET);
 }
 
+static int32_t
+scap_savefile_init_platform(struct scap_platform *platform, char *lasterr, struct scap_engine_handle engine,
+			    struct scap_open_args *oargs)
+{
+	return SCAP_SUCCESS;
+}
+
+static int32_t scap_savefile_close_platform(struct scap_platform* platform)
+{
+	return SCAP_SUCCESS;
+}
+
+static void scap_savefile_free_platform(struct scap_platform* platform)
+{
+	free(platform);
+}
+
+bool scap_savefile_is_thread_alive(struct scap_platform* platform, int64_t pid, int64_t tid, const char* comm)
+{
+	return false;
+}
+
+static const struct scap_platform_vtable scap_savefile_platform_vtable = {
+	.init_platform = scap_savefile_init_platform,
+	.is_thread_alive = scap_savefile_is_thread_alive,
+	.close_platform = scap_savefile_close_platform,
+	.free_platform = scap_savefile_free_platform,
+};
+
+struct scap_platform *scap_savefile_alloc_platform(proc_entry_callback proc_callback, void *proc_callback_context)
+{
+	struct scap_savefile_platform *platform = calloc(1, sizeof(*platform));
+
+	if(platform == NULL)
+	{
+		return NULL;
+	}
+
+	platform->m_generic.m_vtable = &scap_savefile_platform_vtable;
+	platform->m_generic.m_machine_info.num_cpus = (uint32_t)-1;
+
+	init_proclist(&platform->m_generic.m_proclist, proc_callback, proc_callback_context);
+
+	return &platform->m_generic;
+}
+
 static struct savefile_engine* alloc_handle(struct scap* main_handle, char* lasterr_ptr)
 {
 	struct savefile_engine *engine = calloc(1, sizeof(struct savefile_engine));
@@ -2059,6 +2128,9 @@ static int32_t init(struct scap* main_handle, struct scap_open_args* oargs)
 	const char* fname = params->fname;
 	uint64_t start_offset = params->start_offset;
 	uint32_t fbuffer_size = params->fbuffer_size;
+
+	struct scap_platform *platform = params->platform;
+	handle->m_platform = params->platform;
 
 	if(fd != 0)
 	{
@@ -2113,10 +2185,10 @@ static int32_t init(struct scap* main_handle, struct scap_open_args* oargs)
 	res = scap_read_init(
 		handle,
 		reader,
-		&main_handle->m_machine_info,
-		&main_handle->m_proclist,
-		&main_handle->m_addrlist,
-		&main_handle->m_userlist,
+		&platform->m_machine_info,
+		&platform->m_proclist,
+		&platform->m_addrlist,
+		&platform->m_userlist,
 		main_handle->m_lasterr
 	);
 
@@ -2137,10 +2209,10 @@ static int32_t init(struct scap* main_handle, struct scap_open_args* oargs)
 
 	if(!oargs->import_users)
 	{
-		if(main_handle->m_userlist != NULL)
+		if(platform->m_userlist != NULL)
 		{
-			scap_free_userlist(main_handle->m_userlist);
-			main_handle->m_userlist = NULL;
+			scap_free_userlist(platform->m_userlist);
+			platform->m_userlist = NULL;
 		}
 	}
 
@@ -2173,15 +2245,18 @@ static int32_t scap_savefile_close(struct scap_engine_handle engine)
 static int32_t scap_savefile_restart_capture(scap_t* handle)
 {
 	struct savefile_engine *engine = handle->m_engine.m_handle;
+	struct scap_platform *platform = engine->m_platform;
 	int32_t res;
+
+	scap_platform_close(platform);
 
 	if((res = scap_read_init(
 		engine,
 		engine->m_reader,
-		&handle->m_machine_info,
-		&handle->m_proclist,
-		&handle->m_addrlist,
-		&handle->m_userlist,
+		&platform->m_machine_info,
+		&platform->m_proclist,
+		&platform->m_addrlist,
+		&platform->m_userlist,
 		handle->m_lasterr)) != SCAP_SUCCESS)
 	{
 		char error[SCAP_LASTERR_SIZE];
@@ -2196,23 +2271,16 @@ static int64_t get_readfile_offset(struct scap_engine_handle engine)
 	return engine.m_handle->m_reader->offset(engine.m_handle->m_reader);
 }
 
-static uint32_t get_event_dump_flags(struct scap_engine_handle engine)
-{
-	return engine.m_handle->m_last_evt_dump_flags;
-}
-
 static struct scap_savefile_vtable savefile_ops = {
 	.ftell_capture = scap_savefile_ftell,
 	.fseek_capture = scap_savefile_fseek,
 
 	.restart_capture = scap_savefile_restart_capture,
 	.get_readfile_offset = get_readfile_offset,
-	.get_event_dump_flags = get_event_dump_flags,
 };
 
 struct scap_vtable scap_savefile_engine = {
 	.name = SAVEFILE_ENGINE,
-	.mode = SCAP_MODE_CAPTURE,
 	.savefile_ops = &savefile_ops,
 
 	.alloc_handle = alloc_handle,
@@ -2228,10 +2296,6 @@ struct scap_vtable scap_savefile_engine = {
 	.get_n_tracepoint_hit = noop_get_n_tracepoint_hit,
 	.get_n_devs = noop_get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,
-	.get_threadlist = noop_get_threadlist,
-	.get_vpid = noop_get_vxid,
-	.get_vtid = noop_get_vxid,
-	.getpid_global = noop_getpid_global,
 	.get_api_version = NULL,
 	.get_schema_version = NULL,
 };

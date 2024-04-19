@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -15,25 +16,25 @@ int BPF_PROG(tgkill_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, TGKILL_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, TGKILL_E_SIZE, PPME_SYSCALL_TGKILL_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_TGKILL_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: tgid (type: PT_PID) */
-	pid_t tgid = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)tgid);
+	pid_t tgid = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)tgid);
 
 	/* Parameter 2: tid (type: PT_PID) */
-	pid_t tid = (s32)extract__syscall_argument(regs, 1);
-	ringbuf__store_s64(&ringbuf, (s64)tid);
+	pid_t tid = (int32_t)extract__syscall_argument(regs, 1);
+	ringbuf__store_s64(&ringbuf, (int64_t)tid);
 
 	/* Parameter 3: sig (type: PT_SIGTYPE) */
-	u8 sig = (u8)extract__syscall_argument(regs, 2);
+	uint8_t sig = (uint8_t)extract__syscall_argument(regs, 2);
 	ringbuf__store_u8(&ringbuf, sig);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
@@ -53,12 +54,12 @@ int BPF_PROG(tgkill_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, TGKILL_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, TGKILL_X_SIZE, PPME_SYSCALL_TGKILL_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_TGKILL_X);
+	ringbuf__store_event_header(&ringbuf);
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: res (type: PT_ERRNO)*/

@@ -1,6 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
 #
-# libbpf
+# Copyright (C) 2023 The Falco Authors.
 #
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations under the License.
+#
+
 option(USE_BUNDLED_LIBBPF "Enable building of the bundled libbpf" ${USE_BUNDLED_DEPS})
 
 if(LIBBPF_INCLUDE)
@@ -14,6 +25,8 @@ elseif(NOT USE_BUNDLED_LIBBPF)
         message(FATAL_ERROR "Couldn't find system libbpf")
     endif()
 else()
+    include(zlib)
+    include(libelf)
     set(LIBBPF_SRC "${PROJECT_BINARY_DIR}/libbpf-prefix/src")
     set(LIBBPF_BUILD_DIR "${LIBBPF_SRC}/libbpf-build")
     set(LIBBPF_INCLUDE "${LIBBPF_BUILD_DIR}/root/usr/include")
@@ -22,13 +35,14 @@ else()
         libbpf
         PREFIX "${PROJECT_BINARY_DIR}/libbpf-prefix"
         DEPENDS zlib libelf
-        URL "https://github.com/libbpf/libbpf/archive/refs/tags/v1.0.1.tar.gz"
+        URL "https://github.com/libbpf/libbpf/archive/refs/tags/v1.3.0.tar.gz"
         URL_HASH
-        "SHA256=3d6afde67682c909e341bf194678a8969f17628705af25f900d5f68bd299cb03"
+        "SHA256=11db86acd627e468bc48b7258c1130aba41a12c4d364f78e184fd2f5a913d861"
         CONFIGURE_COMMAND mkdir -p build root
-        BUILD_COMMAND ${CMD_MAKE} BUILD_STATIC_ONLY=y OBJDIR=${LIBBPF_BUILD_DIR}/build DESTDIR=${LIBBPF_BUILD_DIR}/root NO_PKG_CONFIG=1 "EXTRA_CFLAGS=-I${LIBELF_INCLUDE} -I${ZLIB_INCLUDE}" "LDFLAGS=-Wl,-Bstatic" "EXTRA_LDFLAGS=-L${LIBELF_SRC}/libelf/libelf -L${ZLIB_SRC}" -C ${LIBBPF_SRC}/libbpf/src install install_uapi_headers
+        BUILD_COMMAND make BUILD_STATIC_ONLY=y OBJDIR=${LIBBPF_BUILD_DIR}/build DESTDIR=${LIBBPF_BUILD_DIR}/root NO_PKG_CONFIG=1 "EXTRA_CFLAGS=-fPIC -I${LIBELF_INCLUDE} -I${ZLIB_INCLUDE}" "LDFLAGS=-Wl,-Bstatic" "EXTRA_LDFLAGS=-L${LIBELF_SRC}/libelf/libelf -L${ZLIB_SRC}" -C ${LIBBPF_SRC}/libbpf/src install install_uapi_headers
         INSTALL_COMMAND ""
         UPDATE_COMMAND ""
+        BUILD_BYPRODUCTS ${LIBBPF_LIB}
     )
     message(STATUS "Using bundled libbpf: include'${LIBBPF_INCLUDE}', lib: ${LIBBPF_LIB}")
     install(FILES "${LIBBPF_LIB}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/${LIBS_PACKAGE_NAME}"

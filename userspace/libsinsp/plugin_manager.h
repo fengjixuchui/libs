@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,10 +21,10 @@ limitations under the License.
 #include <vector>
 #include <string>
 #include <unordered_map>
-#include "version.h"
-#include "event.h"
-#include "plugin.h"
-#include "sinsp_exception.h"
+#include <libsinsp/version.h>
+#include <libsinsp/event.h>
+#include <libsinsp/plugin.h>
+#include <libsinsp/sinsp_exception.h>
 
 /**
  * @brief Manager for plugins loaded at runtime.
@@ -42,7 +43,6 @@ public:
 		m_last_source_out(-1) { }
 	virtual ~sinsp_plugin_manager() = default;
 	sinsp_plugin_manager(sinsp_plugin_manager&&) = default;
-	sinsp_plugin_manager& operator = (sinsp_plugin_manager&&) = default;
 	sinsp_plugin_manager(const sinsp_plugin_manager& s) = delete;
 	sinsp_plugin_manager& operator = (const sinsp_plugin_manager& s) = delete;
 
@@ -60,23 +60,48 @@ public:
 					"found another plugin with name " + it->name() + ". Aborting.");
 			}
 
+			/* Every plugin with event sourcing capability requires its own unique plugin event ID unless the ID is `0`
+			 * in that case there could be multiple plugins with sourcing capabilities loaded
+			 */
 			if (it->caps() & CAP_SOURCING
 				&& plugin->caps() & CAP_SOURCING
+				&& plugin->id() != 0
 				&& it->id() == plugin->id())
 			{
 				throw sinsp_exception(
 					"found another plugin with ID " + std::to_string(it->id()) + ". Aborting.");
 			}
 		}
-		auto plugin_index = m_plugins.size();
-		m_plugins.push_back(plugin);
-		if (plugin->caps() & CAP_SOURCING)
+		if (plugin->caps() & CAP_SOURCING && plugin->id() != 0)
 		{
+			// note: we avoid duplicate entries in the evt sources list
+			bool existing = false;
+
+			/* Get the source index:
+			 * - First we search it in the array to see if it is already present
+			 * - if not present the new source position will be the first available in the `m_event_sources` array
+			 */
 			auto source_index = m_event_sources.size();
-			m_event_sources.push_back(plugin->event_source());
+			for (size_t i = 0; i < m_event_sources.size(); i++)
+			{
+				if (m_event_sources[i] == plugin->event_source())
+				{
+					existing = true;
+					source_index = i;
+					break;
+				}
+			}
+			if (!existing)
+			{
+				/* Push the source in the array if it doesn't already exist */
+				m_event_sources.push_back(plugin->event_source());
+			}
+			auto plugin_index = m_plugins.size();
 			m_plugins_id_index[plugin->id()] = plugin_index;
 			m_plugins_id_source_index[plugin->id()] = source_index;
 		}
+		/* Push the new plugin in the array */
+		m_plugins.push_back(plugin);
 	}
 
 	/**
@@ -115,30 +140,47 @@ public:
 	{
 		if(evt && evt->get_type() == PPME_PLUGINEVENT_E)
 		{
-			sinsp_evt_param *parinfo = evt->get_param(0);
-			ASSERT(parinfo->m_len == sizeof(int32_t));
-			return plugin_by_id(*(int32_t *)parinfo->m_val);
+			return plugin_by_id(evt->get_param(0)->as<int32_t>());
 		}
 		return nullptr;
 	}
 
 	/**
-	 * @brief Given a plugin id, returns a the index of a source name as
+	 * @brief Given a plugin id, returns the index of a source name as
 	 * in the order of the inspector's event sources list. `found` is filled
 	 * with `true` if a plugin with a given ID is found in the manager,
 	 * otherwise it is filled with `false`.
 	 */
 	inline std::size_t source_idx_by_plugin_id(uint32_t plugin_id, bool& found) const
 	{
-		auto it = m_plugins_id_source_index.find(plugin_id);
-		found = it != m_plugins_id_source_index.end();
-		return found ? it->second : sinsp_no_event_source_idx;
+		if (plugin_id != m_last_source_in)
+		{
+			auto it = m_plugins_id_source_index.find(plugin_id);
+			if(it == m_plugins_id_source_index.end())
+			{
+				found = false;
+				return sinsp_no_event_source_idx;
+			}
+			m_last_source_in = plugin_id;
+			m_last_source_out = it->second;
+		}
+		found = true;
+		return m_last_source_out;
 	}
 
 private:
+	/* vector containing all plugins event source names, added in order of arrival.
+	 * This is a reference to the inspector one!
+	 */
 	std::vector<std::string>& m_event_sources;
+
+	/* vector containing all loaded plugins, added in order of arrival */
 	std::vector<std::shared_ptr<sinsp_plugin>> m_plugins;
+
+	/* The key is the plugin id the value is the index of the plugin in the `m_plugins` vector */
 	std::unordered_map<uint32_t, size_t> m_plugins_id_index;
+
+	/* The key is the plugin id the value is the index of the plugin source in the `m_event_sources` vector */
 	std::unordered_map<uint32_t, size_t> m_plugins_id_source_index;
 	mutable size_t m_last_id_in;
 	mutable size_t m_last_id_out;

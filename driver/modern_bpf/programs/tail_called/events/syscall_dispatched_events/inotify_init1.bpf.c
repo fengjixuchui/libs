@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,12 +16,12 @@ int BPF_PROG(inotify_init1_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, INOTIFY_INIT1_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, INOTIFY_INIT1_E_SIZE, PPME_SYSCALL_INOTIFY_INIT1_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_INOTIFY_INIT1_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -43,12 +44,12 @@ int BPF_PROG(inotify_init1_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, INOTIFY_INIT1_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, INOTIFY_INIT1_X_SIZE, PPME_SYSCALL_INOTIFY_INIT1_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_INOTIFY_INIT1_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -56,7 +57,7 @@ int BPF_PROG(inotify_init1_x,
 	ringbuf__store_s64(&ringbuf, ret);
 
 	/* Parameter 2: flags (type: PT_FLAGS16) */
-	s32 flags = (s32)extract__syscall_argument(regs, 0);
+	int32_t flags = (int32_t)extract__syscall_argument(regs, 0);
 	ringbuf__store_u16(&ringbuf, inotify_init1_flags_to_scap(flags));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

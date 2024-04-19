@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -12,15 +13,15 @@
 /* This enum is used to tell if we are considering a syscall or a tracepoint */
 enum intrumentation_type
 {
-	SYSCALL = 0,
-	TRACEPOINT = 1,
+	MODERN_BPF_SYSCALL = 0,
+	MODERN_BPF_TRACEPOINT = 1,
 };
 
 /* The sampling logic is used by all BPF programs attached to the kernel.
  * We treat the syscalls tracepoints in a dedicated way because they could generate
  * more than one event (1 for each syscall) for this reason we need a dedicated table.
  */
-static __always_inline bool sampling_logic(void* ctx, u32 id, enum intrumentation_type type)
+static __always_inline bool sampling_logic(void* ctx, uint32_t id, enum intrumentation_type type)
 {
 	/* If dropping mode is not enabled we don't perform any sampling
 	 * false: means don't drop the syscall
@@ -36,7 +37,7 @@ static __always_inline bool sampling_logic(void* ctx, u32 id, enum intrumentatio
 	/* If we have a syscall we use the sampling_syscall_table otherwise
 	 * with tracepoints we use the sampling_tracepoint_table.
 	 */
-	if(type == SYSCALL)
+	if(type == MODERN_BPF_SYSCALL)
 	{
 		sampling_flag = maps__64bit_sampling_syscall_table(id);
 	}

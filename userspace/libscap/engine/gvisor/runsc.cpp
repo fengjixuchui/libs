@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +22,7 @@ limitations under the License.
 #include <fstream>
 #include <string>
 
-#include "gvisor.h"
+#include <libscap/engine/gvisor/gvisor.h>
 
 namespace scap_gvisor {
 
@@ -29,7 +30,7 @@ namespace runsc {
 
 result runsc(char *argv[])
 {
-	result res = {0};
+	result res;
 	int pipefds[2];
 
 	int ret = pipe(pipefds);
@@ -42,7 +43,7 @@ result runsc(char *argv[])
 	if(pid > 0)
 	{
 		int status;
-		
+
 		close(pipefds[1]);
 		wait(&status);
 		if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
@@ -84,11 +85,11 @@ result version()
 
 result list(const std::string &root_path)
 {
-	result res = {0};
+	result res;
 	std::vector<std::string> running_sandboxes;
 
 	const char *argv[] = {
-		"runsc", 
+		"runsc",
 		"--root",
 		root_path.c_str(),
 		"list",
@@ -117,13 +118,13 @@ result list(const std::string &root_path)
 result trace_create(const std::string &root_path, const std::string &trace_session_path, const std::string &sandbox_id, bool force)
 {
 	const char *argv[] = {
-		"runsc", 
+		"runsc",
 		"--root",
 		root_path.c_str(),
 		"trace",
 		"create",
 		force ? "--force" : "",
-		"--config", 
+		"--config",
 		trace_session_path.c_str(),
 		sandbox_id.c_str(),
 		NULL
@@ -135,7 +136,7 @@ result trace_create(const std::string &root_path, const std::string &trace_sessi
 result trace_delete(const std::string &root_path, const std::string &session_name, const std::string &sandbox_id)
 {
 	const char *argv[] = {
-		"runsc", 
+		"runsc",
 		"--root",
 		root_path.c_str(),
 		"trace",
@@ -152,13 +153,13 @@ result trace_delete(const std::string &root_path, const std::string &session_nam
 result trace_procfs(const std::string &root_path, const std::string &sandbox_id)
 {
 	const char *argv[] = {
-		"runsc", 
+		"runsc",
 		"--root",
 		root_path.c_str(),
 		"trace",
 		"procfs",
 		sandbox_id.c_str(),
-		NULL, 
+		NULL,
 	};
 
 	return runsc((char **)argv);

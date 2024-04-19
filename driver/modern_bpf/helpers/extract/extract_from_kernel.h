@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -11,9 +12,11 @@
 #include <helpers/base/read_from_task.h>
 #include <driver/ppm_flag_helpers.h>
 
-#ifdef CAPTURE_SOCKETCALL
-#include <syscall.h>
+#if __has_include(<sys/syscall.h>)
+#include <sys/syscall.h>
 #endif
+
+#define __NR_ia32_socketcall 102
 
 /* Used to convert from page number to KB. */
 #define DO_PAGE_SHIFT(x) (x) << (IOC_PAGE_SHIFT - 10)
@@ -40,16 +43,40 @@ enum capability_type
  * @param regs pointer to the struct where we find the arguments
  * @return syscall id
  */
-static __always_inline u32 extract__syscall_id(struct pt_regs *regs)
+static __always_inline uint32_t extract__syscall_id(struct pt_regs *regs)
 {
 #if defined(__TARGET_ARCH_x86)
-	return (u32)regs->orig_ax;
+	return (uint32_t)regs->orig_ax;
 #elif defined(__TARGET_ARCH_arm64)
-	return (u32)regs->syscallno;
+	return (uint32_t)regs->syscallno;
 #elif defined(__TARGET_ARCH_s390)
-	return (u32)regs->int_code & 0xffff;
+	return (uint32_t)regs->int_code & 0xffff;
+#elif defined(__TARGET_ARCH_powerpc)
+	return (uint32_t)regs->gpr[0];
 #else
 	return 0;
+#endif
+}
+
+static __always_inline bool bpf_in_ia32_syscall()
+{
+	uint32_t status = 0;
+	struct task_struct *task = get_current_task();
+
+#if defined(__TARGET_ARCH_x86)
+	READ_TASK_FIELD_INTO(&status, task, thread_info.status);
+	return status & TS_COMPAT;
+#elif defined(__TARGET_ARCH_arm64)
+	READ_TASK_FIELD_INTO(&status, task, thread_info.flags);
+	return status & _TIF_32BIT;
+#elif defined(__TARGET_ARCH_s390)
+	READ_TASK_FIELD_INTO(&status, task, thread_info.flags);
+	return status & _TIF_31BIT;
+#elif defined(__TARGET_ARCH_powerpc)
+	READ_TASK_FIELD_INTO(&status, task, thread_info.flags);
+	return status & _TIF_32BIT;
+#else
+	return false;
 #endif
 }
 
@@ -64,6 +91,35 @@ static __always_inline u32 extract__syscall_id(struct pt_regs *regs)
 static __always_inline unsigned long extract__syscall_argument(struct pt_regs *regs, int idx)
 {
 	unsigned long arg;
+#if defined(__TARGET_ARCH_x86)
+	if (bpf_in_ia32_syscall())
+	{
+		switch(idx)
+		{
+		case 0:
+			arg = BPF_CORE_READ(regs, bx);
+			break;
+		case 1:
+			arg = BPF_CORE_READ(regs, cx);
+			break;
+		case 2:
+			arg = BPF_CORE_READ(regs, dx);
+			break;
+		case 3:
+			arg = BPF_CORE_READ(regs, si);
+			break;
+		case 4:
+			arg = BPF_CORE_READ(regs, di);
+			break;
+		case 5:
+			arg = BPF_CORE_READ(regs, bp);
+			break;
+		default:
+			arg = 0;
+		}
+		return arg;
+	}
+#endif
 	switch(idx)
 	{
 	case 0:
@@ -106,18 +162,34 @@ static __always_inline unsigned long extract__syscall_argument(struct pt_regs *r
  */
 static __always_inline void extract__network_args(void *argv, int num, struct pt_regs *regs)
 {
-#ifdef CAPTURE_SOCKETCALL
+#ifdef __NR_socketcall
 	int id = extract__syscall_id(regs);
 	if(id == __NR_socketcall)
 	{
 		unsigned long args_pointer = extract__syscall_argument(regs, 1);
-		bpf_probe_read_user(argv, num * sizeof(unsigned long), (void*)args_pointer);
+		bpf_probe_read_user(argv, num * sizeof(unsigned long), (void *)args_pointer);
+		return;
+	}
+#elif defined(__TARGET_ARCH_x86)
+	int id = extract__syscall_id(regs);
+	if(bpf_in_ia32_syscall() && id == __NR_ia32_socketcall)
+	{
+		// First read all arguments on 32 bits.
+		uint32_t args_u32[6] = {};
+		unsigned long args_pointer = extract__syscall_argument(regs, 1);
+		bpf_probe_read_user(args_u32, num * sizeof(uint32_t), (void *)args_pointer);
+
+		unsigned long *dst = (unsigned long *)argv;
+		for (int i = 0; i < num; i++)
+		{
+			dst[i] = args_u32[i];
+		}
 		return;
 	}
 #endif
+	unsigned long *dst = (unsigned long *)argv;
 	for (int i = 0; i < num; i++)
 	{
-		unsigned long *dst = (unsigned long *)argv;
 		dst[i] = extract__syscall_argument(regs, i);
 	}
 }
@@ -153,15 +225,18 @@ static __always_inline dev_t encode_dev(dev_t dev)
  * @return struct file* pointer to the `struct file` associated with the
  * file descriptor. Return a NULL pointer in case of failure.
  */
-static __always_inline struct file *extract__file_struct_from_fd(s32 file_descriptor)
+static __always_inline struct file *extract__file_struct_from_fd(int32_t file_descriptor)
 {
 	struct file *f = NULL;
 	if(file_descriptor >= 0)
 	{
-		struct file **fds;
+		struct file **fds = NULL;
 		struct task_struct *task = get_current_task();
-		READ_TASK_FIELD_INTO(&fds, task, files, fdt, fd);
-		bpf_probe_read_kernel(&f, sizeof(struct file *), &fds[file_descriptor]);
+		BPF_CORE_READ_INTO(&fds, task, files, fdt, fd);
+		if(fds != NULL)
+		{
+			bpf_probe_read_kernel(&f, sizeof(struct file *), &fds[file_descriptor]);
+		}
 	}
 	return f;
 }
@@ -172,7 +247,7 @@ static __always_inline struct file *extract__file_struct_from_fd(s32 file_descri
  * @param fd generic file descriptor.
  * @param ino pointer to the inode number we have to fill.
  */
-static __always_inline void extract__ino_from_fd(s32 fd, u64 *ino)
+static __always_inline void extract__ino_from_fd(int32_t fd, uint64_t *ino)
 {
 	struct file *f = extract__file_struct_from_fd(fd);
 	if(!f)
@@ -186,12 +261,23 @@ static __always_inline void extract__ino_from_fd(s32 fd, u64 *ino)
 /**
  * @brief Return the `f_inode` of task exe_file.
  *
- * @param mm pointer to task mm struct.
+ * @param task pointer to task struct.
  * @return `f_inode` of task exe_file.
  */
 static __always_inline struct inode *extract__exe_inode_from_task(struct task_struct *task)
 {
-	return READ_TASK_FIELD(task, mm, exe_file, f_inode);
+	return BPF_CORE_READ(task, mm, exe_file, f_inode);
+}
+
+/**
+ * @brief Return the `exe_file` of task mm.
+ *
+ * @param task pointer to task struct.
+ * @return `f_inode` of task mm.
+ */
+static __always_inline struct file *extract__exe_file_from_task(struct task_struct *task)
+{
+	return READ_TASK_FIELD(task, mm, exe_file);
 }
 
 /**
@@ -201,7 +287,7 @@ static __always_inline struct inode *extract__exe_inode_from_task(struct task_st
  * @param ino pointer to the inode number we have to fill.
  * @return `i_ino` from f_inode.
  */
-static __always_inline void extract__ino_from_inode(struct inode *f_inode, u64 *ino)
+static __always_inline void extract__ino_from_inode(struct inode *f_inode, uint64_t *ino)
 {
 	BPF_CORE_READ_INTO(ino, f_inode, i_ino);
 }
@@ -212,7 +298,7 @@ static __always_inline void extract__ino_from_inode(struct inode *f_inode, u64 *
  * @param time timespec64 struct.
  * @return epoch in ns.
  */
-static __always_inline u64 extract__epoch_ns_from_time(struct timespec64 time)
+static __always_inline uint64_t extract__epoch_ns_from_time(struct timespec64 time)
 {
 	time64_t tv_sec = time.tv_sec;
 	if (tv_sec < 0)
@@ -229,7 +315,7 @@ static __always_inline u64 extract__epoch_ns_from_time(struct timespec64 time)
  * @param dev pointer to the device number we have to fill.
  * @param ino pointer to the inode number we have to fill.
  */
-static __always_inline void extract__dev_and_ino_from_fd(s32 fd, dev_t *dev, u64 *ino)
+static __always_inline void extract__dev_and_ino_from_fd(int32_t fd, dev_t *dev, uint64_t *ino)
 {
 	struct file *f = extract__file_struct_from_fd(fd);
 	if(!f)
@@ -240,6 +326,33 @@ static __always_inline void extract__dev_and_ino_from_fd(s32 fd, dev_t *dev, u64
 	BPF_CORE_READ_INTO(dev, f, f_inode, i_sb, s_dev);
 	*dev = encode_dev(*dev);
 	BPF_CORE_READ_INTO(ino, f, f_inode, i_ino);
+}
+
+/**
+ * \brief Extract the file mode created flag from a file descriptor.
+ *
+ * @param fd generic file descriptor.
+ * @return PPM_O_F_CREATED if file is created.
+ */
+static __always_inline uint32_t extract__fmode_created_from_fd(int32_t fd)
+{
+	if(fd < 0)
+	{
+    	return 0;
+	}
+
+	struct file *f = extract__file_struct_from_fd(fd);
+	if(!f)
+	{
+		return 0;
+	}
+
+	uint32_t mode = BPF_CORE_READ(f, f_mode);
+
+	if(mode & FMODE_CREATED)
+		return PPM_O_F_CREATED;
+
+	return 0;
 }
 
 /**
@@ -275,7 +388,7 @@ static __always_inline void extract__fdlimit(struct task_struct *task, unsigned 
  * @param capability_type type of capability to extract defined by us.
  * @return PPM encoded capability value
  */
-static __always_inline u64 extract__capability(struct task_struct *task, enum capability_type capability_type)
+static __always_inline uint64_t extract__capability(struct task_struct *task, enum capability_type capability_type)
 {
 	kernel_cap_t cap_struct;
 	unsigned long capability;
@@ -299,7 +412,14 @@ static __always_inline u64 extract__capability(struct task_struct *task, enum ca
 		break;
 	}
 
-	return capabilities_to_scap(((unsigned long)cap_struct.cap[1] << 32) | cap_struct.cap[0]);
+	// Kernel 6.3 changed the kernel_cap_struct type from uint32_t[2] to uint64_t.
+	// Luckily enough, it also changed field name from cap to val.
+	if(bpf_core_field_exists(((struct kernel_cap_struct *)0)->cap))
+	{
+		return capabilities_to_scap(((unsigned long)cap_struct.cap[1] << 32) | cap_struct.cap[0]);
+	}
+	kernel_cap_t___v6_3 *new_cap = (kernel_cap_t___v6_3 *)&cap_struct;
+	return capabilities_to_scap(((unsigned long)new_cap->val));
 }
 
 /////////////////////////
@@ -337,7 +457,7 @@ static __always_inline struct pid *extract__task_pid_struct(struct task_struct *
  */
 static __always_inline struct pid_namespace *extract__namespace_of_pid(struct pid *pid)
 {
-	u32 level = 0;
+	uint32_t level = 0;
 	struct pid_namespace *ns = NULL;
 	if(pid)
 	{
@@ -435,7 +555,7 @@ static __always_inline pid_t extract__task_xid_vnr(struct task_struct *task, enu
  * @param type pid type.
  * @return `start_time` of init task struct from pid namespace seen from current task pid namespace.
  */
-static __always_inline u64 extract__task_pidns_start_time(struct task_struct *task, enum pid_type type, long in_childtid)
+static __always_inline uint64_t extract__task_pidns_start_time(struct task_struct *task, enum pid_type type, long in_childtid)
 {
 	// only perform lookup when clone/vfork/fork returns 0 (child process / childtid)
 	if (in_childtid == 0)
@@ -494,9 +614,9 @@ static __always_inline unsigned long extract__vm_size(struct mm_struct *mm)
  */
 static __always_inline unsigned long extract__vm_rss(struct mm_struct *mm)
 {
-	s64 file_pages = 0;
-	s64 anon_pages = 0;
-	s64 shmem_pages = 0;
+	int64_t file_pages = 0;
+	int64_t anon_pages = 0;
+	int64_t shmem_pages = 0;
 
 	/* In recent kernel versions (https://github.com/torvalds/linux/commit/f1a7941243c102a44e8847e3b94ff4ff3ec56f25)
 	 * `struct mm_rss_stat` doesn't exist anymore.
@@ -525,7 +645,7 @@ static __always_inline unsigned long extract__vm_rss(struct mm_struct *mm)
  */
 static __always_inline unsigned long extract__vm_swap(struct mm_struct *mm)
 {
-	s64 swap_entries = 0;
+	int64_t swap_entries = 0;
 	if(bpf_core_type_exists(struct mm_rss_stat))
 	{
 		BPF_CORE_READ_INTO(&swap_entries, mm, rss_stat.count[MM_SWAPENTS].counter);
@@ -548,7 +668,7 @@ static __always_inline unsigned long extract__vm_swap(struct mm_struct *mm)
  * @param task pointer to task_struct.
  * @return encoded tty number
  */
-static __always_inline u32 exctract__tty(struct task_struct *task)
+static __always_inline uint32_t exctract__tty(struct task_struct *task)
 {
 	struct signal_struct *signal;
 	struct tty_struct *tty;
@@ -595,11 +715,22 @@ static __always_inline u32 exctract__tty(struct task_struct *task)
  * @param task pointer to task struct
  * @param loginuid return value by reference
  */
-static __always_inline void extract__loginuid(struct task_struct *task, u32 *loginuid)
+static __always_inline void extract__loginuid(struct task_struct *task, uint32_t *loginuid)
 {
+	*loginuid = UINT32_MAX;
+
 	if(bpf_core_field_exists(task->loginuid))
 	{
 		READ_TASK_FIELD_INTO(loginuid, task, loginuid.val);
+	}
+	else
+	{
+		struct task_struct___cos *task_cos = (void *)task;
+
+		if(bpf_core_field_exists(struct task_struct___cos, audit))
+		{
+			BPF_CORE_READ_INTO(loginuid, task_cos, audit, loginuid.val);
+		}
 	}
 }
 
@@ -616,7 +747,7 @@ static __always_inline void extract__loginuid(struct task_struct *task, u32 *log
  */
 static __always_inline unsigned long extract__clone_flags(struct task_struct *task, unsigned long flags)
 {
-	unsigned long ppm_flags = clone_flags_to_scap(flags);
+	unsigned long ppm_flags = clone_flags_to_scap((int) flags);
 	struct pid *pid = extract__task_pid_struct(task, PIDTYPE_PID);
 	struct pid_namespace *ns = extract__namespace_of_pid(pid);
 	unsigned int ns_level;
@@ -624,16 +755,17 @@ static __always_inline unsigned long extract__clone_flags(struct task_struct *ta
 
 	if(ns_level != 0)
 	{
-		flags |= PPM_CL_CHILD_IN_PIDNS;
+		ppm_flags |= PPM_CL_CHILD_IN_PIDNS;
 	}
 	else
 	{
+		/* This alternative check is meaningful only for the parent and not for the child */
 		struct pid_namespace *ns_children;
 		READ_TASK_FIELD_INTO(&ns_children, task, nsproxy, pid_ns_for_children);
 
 		if(ns_children != ns)
 		{
-			flags |= PPM_CL_CHILD_IN_PIDNS;
+			ppm_flags |= PPM_CL_CHILD_IN_PIDNS;
 		}
 	}
 	return ppm_flags;
@@ -649,8 +781,9 @@ static __always_inline unsigned long extract__clone_flags(struct task_struct *ta
  * @param task pointer to task struct
  * @param euid return value by reference
  */
-static __always_inline void extract__euid(struct task_struct *task, u32 *euid)
+static __always_inline void extract__euid(struct task_struct *task, uint32_t *euid)
 {
+	*euid = UINT32_MAX;
 	READ_TASK_FIELD_INTO(euid, task, cred, euid.val);
 }
 
@@ -660,7 +793,7 @@ static __always_inline void extract__euid(struct task_struct *task, u32 *euid)
  * @param task pointer to task struct
  * @param egid return value by reference
  */
-static __always_inline void extract__egid(struct task_struct *task, u32 *egid)
+static __always_inline void extract__egid(struct task_struct *task, uint32_t *egid)
 {
 	READ_TASK_FIELD_INTO(egid, task, cred, egid.val);
 }
@@ -669,7 +802,7 @@ static __always_inline void extract__egid(struct task_struct *task, u32 *egid)
 // EXECVE FLAGS EXTRACTION
 ////////////////////////
 
-static __always_inline bool extract__exe_upper_layer(struct inode *inode)
+static __always_inline bool extract__exe_upper_layer(struct inode *inode, struct file *exe_file)
 {
 	unsigned long sb_magic = BPF_CORE_READ(inode, i_sb, s_magic);
 
@@ -685,13 +818,96 @@ static __always_inline bool extract__exe_upper_layer(struct inode *inode)
 
 		bpf_probe_read_kernel(&upper_dentry, sizeof(upper_dentry), vfs_inode + inode_size);
 
-		if(upper_dentry)
+		if(!upper_dentry)
+		{
+			return false;
+		}
+
+		struct dentry *dentry = (struct dentry *)BPF_CORE_READ(exe_file, f_path.dentry);
+
+		unsigned int d_flags = BPF_CORE_READ(dentry, d_flags);
+		bool disconnected = (d_flags & DCACHE_DISCONNECTED);
+		if(disconnected)
 		{
 			return true;
 		}
+
+		unsigned long flags = 0;
+		if(bpf_core_field_exists(((struct ovl_entry___before_v6_5*)0)->flags))
+		{
+			// kernel <6.5
+			struct ovl_entry___before_v6_5 *oe = (struct ovl_entry___before_v6_5*)BPF_CORE_READ(dentry, d_fsdata);
+			flags = (unsigned long)BPF_CORE_READ(oe, flags);
+		}
+		else
+		{
+			// In kernels >=6.5 d_fsdata represents an ovl_entry_flag.
+			flags = (unsigned long)BPF_CORE_READ(dentry, d_fsdata);
+		}
+
+		unsigned long has_upper = (flags & (1U << (OVL_E_UPPER_ALIAS)));
+		if(has_upper)
+		{
+			return true;
+		}
+
 	}
 
 	return false;
+}
+
+/*
+ * Detect whether the file being referenced is an anonymous file created using memfd_create()
+ * and is being executed by referencing its file descriptor (fd). This type of file does not
+ * exist on disk and resides solely in memory, but it is treated as a legitimate file with an
+ * inode object and other file attributes.
+ *
+ **/
+static __always_inline bool extract__exe_from_memfd(struct file *file)
+{
+	struct dentry *dentry = BPF_CORE_READ(file, f_path.dentry);
+	if(!dentry)
+	{
+		bpf_printk("extract__exe_from_memfd(): failed to get dentry");
+		return false;
+	}
+
+	struct dentry *parent = BPF_CORE_READ(dentry, d_parent);
+	if(!parent)
+	{
+		bpf_printk("extract__exe_from_memfd(): failed to get parent");
+		return false;
+	}
+
+	if(parent != dentry)
+	{
+		return false;
+	}
+
+	const unsigned char *name = BPF_CORE_READ(dentry, d_name.name);
+	if(!name)
+	{
+		bpf_printk("extract__exe_from_memfd(): failed to get name");
+		return false;
+	}
+
+	const char expected_prefix[] = "memfd:";
+	char memfd_name[sizeof(expected_prefix)] = {'\0'};
+
+	if(bpf_probe_read_kernel_str(memfd_name, sizeof(memfd_name), name) != sizeof(expected_prefix))
+	{
+		return false;
+	}
+
+	for(int i = 0; i < sizeof(expected_prefix); i++)
+	{
+		if(expected_prefix[i] != memfd_name[i])
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 /* log(NGROUPS_MAX) = log(65536) */
@@ -701,11 +917,11 @@ static __always_inline bool extract__exe_upper_layer(struct inode *inode)
 #define UID_GID_MAP_MAX_BASE_EXTENTS 5
 
 /* UP means get NS id (uid/gid) from kuid/kgid */
-static __always_inline u32 bpf_map_id_up(struct uid_gid_map *map, u32 id)
+static __always_inline uint32_t bpf_map_id_up(struct uid_gid_map *map, uint32_t id)
 {
-	u32 first = 0;
-	u32 last = 0;
-	u32 nr_extents = BPF_CORE_READ(map, nr_extents);
+	uint32_t first = 0;
+	uint32_t last = 0;
+	uint32_t nr_extents = BPF_CORE_READ(map, nr_extents);
 	struct uid_gid_extent *extent = NULL;
 
 	for(int j = 0; j < UID_GID_MAP_MAX_BASE_EXTENTS; j++)
@@ -727,19 +943,19 @@ static __always_inline u32 bpf_map_id_up(struct uid_gid_map *map, u32 id)
 	/* Map the id or note failure */
 	if(extent)
 	{
-		u32 first = BPF_CORE_READ(extent, first);
-		u32 lower_first = BPF_CORE_READ(extent, lower_first);
+		uint32_t first = BPF_CORE_READ(extent, first);
+		uint32_t lower_first = BPF_CORE_READ(extent, lower_first);
 		id = id - lower_first + first;
 	}
 	else
 	{
-		id = (u32)-1;
+		id = (uint32_t)-1;
 	}
 
 	return id;
 }
 
-static __always_inline bool groups_search(struct task_struct *task, u32 grp)
+static __always_inline bool groups_search(struct task_struct *task, uint32_t grp)
 {
 	struct group_info *group_info = NULL;
 	READ_TASK_FIELD_INTO(&group_info, task, cred, group_info);
@@ -751,7 +967,7 @@ static __always_inline bool groups_search(struct task_struct *task, u32 grp)
 	unsigned int left = 0;
 	unsigned int right = BPF_CORE_READ(group_info, ngroups);
 	unsigned int mid = 0;
-	u32 grp_mid = 0;
+	uint32_t grp_mid = 0;
 
 	for(int j = 0; j < MAX_GROUP_SEARCH_DEPTH; j++)
 	{
@@ -783,7 +999,7 @@ static __always_inline bool groups_search(struct task_struct *task, u32 grp)
 static __always_inline bool extract__exe_writable(struct task_struct *task, struct inode *inode)
 {
 	umode_t i_mode = BPF_CORE_READ(inode, i_mode);
-	u32 i_flags = BPF_CORE_READ(inode, i_flags);
+	uint32_t i_flags = BPF_CORE_READ(inode, i_flags);
 	long unsigned int s_flags = BPF_CORE_READ(inode, i_sb, s_flags);
 
 	/* Check superblock permissions, i.e. if the FS is read only */
@@ -797,11 +1013,11 @@ static __always_inline bool extract__exe_writable(struct task_struct *task, stru
 		return false;
 	}
 
-	u32 i_uid = BPF_CORE_READ(inode, i_uid.val);
-	u32 i_gid = BPF_CORE_READ(inode, i_gid.val);
+	uint32_t i_uid = BPF_CORE_READ(inode, i_uid.val);
+	uint32_t i_gid = BPF_CORE_READ(inode, i_gid.val);
 
-	u32 fsuid;
-	u32 fsgid;
+	uint32_t fsuid;
+	uint32_t fsgid;
 	READ_TASK_FIELD_INTO(&fsuid, task, cred, fsuid.val);
 	READ_TASK_FIELD_INTO(&fsgid, task, cred, fsgid.val);
 
@@ -857,20 +1073,43 @@ static __always_inline bool extract__exe_writable(struct task_struct *task, stru
 
 	struct user_namespace *ns;
 	READ_TASK_FIELD_INTO(&ns, task, cred, user_ns);
-	bool kuid_mapped = bpf_map_id_up(&ns->uid_map, i_uid) != (u32)-1;
-	bool kgid_mapped = bpf_map_id_up(&ns->gid_map, i_gid) != (u32)-1;
+	if(ns == NULL)
+	{
+		return false;
+	}
+	bool kuid_mapped = bpf_map_id_up(&ns->uid_map, i_uid) != (uint32_t)-1;
+	bool kgid_mapped = bpf_map_id_up(&ns->gid_map, i_gid) != (uint32_t)-1;
 
 	kernel_cap_t cap_struct = {0};
 	READ_TASK_FIELD_INTO(&cap_struct, task, cred, cap_effective);
-	if(cap_raised(cap_struct, CAP_DAC_OVERRIDE) && kuid_mapped && kgid_mapped)
+	// Kernel 6.3 changed the kernel_cap_struct type from uint32_t[2] to uint64_t.
+	// Luckily enough, it also changed field name from cap to val.
+	if(bpf_core_field_exists(((struct kernel_cap_struct *)0)->cap))
 	{
-		return true;
-	}
+		if(cap_raised(cap_struct, CAP_DAC_OVERRIDE) && kuid_mapped && kgid_mapped)
+		{
+			return true;
+		}
 
-	/* Check if the user is capable. Even if it doesn't own the file or the read bits are not set, root with CAP_FOWNER can do what it wants. */
-	if(cap_raised(cap_struct, CAP_FOWNER) && kuid_mapped)
+		/* Check if the user is capable. Even if it doesn't own the file or the read bits are not set, root with CAP_FOWNER can do what it wants. */
+		if(cap_raised(cap_struct, CAP_FOWNER) && kuid_mapped)
+		{
+			return true;
+		}
+	}
+	else
 	{
-		return true;
+		kernel_cap_t___v6_3 *new_cap = (kernel_cap_t___v6_3 *)&cap_struct;
+		if(cap_raised___v6_3(*new_cap, CAP_DAC_OVERRIDE) && kuid_mapped && kgid_mapped)
+		{
+			return true;
+		}
+
+		/* Check if the user is capable. Even if it doesn't own the file or the read bits are not set, root with CAP_FOWNER can do what it wants. */
+		if(cap_raised___v6_3(*new_cap, CAP_FOWNER) && kuid_mapped)
+		{
+			return true;
+		}
 	}
 
 	return false;

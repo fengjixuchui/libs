@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,10 +19,10 @@ limitations under the License.
 #include <stdio.h>
 #include <stdint.h>
 
-#include "devset.h"
-#include "../../../driver/ppm_ringbuffer.h"
-#include "barrier.h"
-#include "sleep.h"
+#include <libscap/ringbuffer/devset.h>
+#include <driver/ppm_ringbuffer.h>
+#include <libscap/scap_barrier.h>
+#include <libscap/scap_sleep.h>
 
 /* Check buffer dimension in bytes. 
  * Our 2 eBPF probes require that this number is a power of 2! Right now we force this
@@ -210,14 +211,15 @@ static inline void ringbuffer_advance_to_evt(scap_device* dev, scap_evt *event)
  * - before refilling a buffer we have to consume all the others!
  * - we perform a lot of cycles but we have to be super fast here!
  */
-static inline int32_t ringbuffer_next(struct scap_device_set *devset, OUT scap_evt** pevent, OUT uint16_t* pcpuid)
+static inline int32_t ringbuffer_next(struct scap_device_set* devset, OUT scap_evt** pevent, OUT uint16_t* pdevid,
+				      OUT uint32_t* pflags)
 {
 	uint32_t j;
 	uint64_t min_ts = 0xffffffffffffffffLL;
 	scap_evt* pe = NULL;
 	uint32_t ndevs = devset->m_ndevs;
 
-	*pcpuid = 65535;
+	*pdevid = 65535;
 
 	for(j = 0; j < ndevs; j++)
 	{
@@ -275,19 +277,21 @@ static inline int32_t ringbuffer_next(struct scap_device_set *devset, OUT scap_e
 			}
 
 			*pevent = pe;
-			*pcpuid = j;
+			*pdevid = j;
 			min_ts = pe->ts;
 		}
 	}
 
-
-	if(*pcpuid != 65535)
+	if(*pdevid != 65535)
 	{
 		/* Check from which buffer we have read and move the position inside
 	 	 * the block with `ADVANCE_TO_EVT`
 	 	 */
-		struct scap_device *dev = &devset->m_devs[*pcpuid];
+		struct scap_device* dev = &devset->m_devs[*pdevid];
 		ADVANCE_TO_EVT(dev, (*pevent));
+
+		// we don't really store the flags in the ringbuffer anywhere
+		*pflags = 0;
 		return SCAP_SUCCESS;
 	}
 	else

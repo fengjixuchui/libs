@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,11 +20,9 @@ limitations under the License.
 
 #include <stdbool.h>
 #include <stdlib.h>
-#include "../../../../driver/ppm_events_public.h"
-#include "scap_open.h"
-#include "../libscap/engine/modern_bpf/modern_bpf_public.h"
-#include "scap_modern_bpf_stats.h"
-#include "scap_stats_v2.h"
+#include <driver/ppm_events_public.h>
+#include <libscap/scap_open.h>
+#include <libscap/engine/modern_bpf/modern_bpf_public.h>
 
 struct scap;
 
@@ -35,8 +34,5 @@ struct modern_bpf_engine
 	uint64_t m_api_version;
 	uint64_t m_schema_version;
 	bool capturing;
-	/* buffer m_stats holds scap_stats_v2 statistics, static const sized for now,
-	 * will be refactored and adjusted to dynamic allocation similar to bpf in
-	 * in a follow up PR. */
-	scap_stats_v2 m_stats[MODERN_BPF_MAX_KERNEL_COUNTERS_STATS];
+	uint64_t m_flags;
 };

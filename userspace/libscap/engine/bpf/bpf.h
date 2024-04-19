@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,11 +19,11 @@ limitations under the License.
 #pragma once
 
 #include <stdbool.h>
-#include "../../ringbuffer/devset.h"
-#include "scap_open.h"
-#include "attached_prog.h"
-#include "scap_stats_v2.h"
-#include "scap_bpf_stats.h"
+#include <libscap/ringbuffer/devset.h>
+#include <libscap/scap_open.h>
+#include <libscap/engine/bpf/attached_prog.h>
+#include <libscap/metrics_v2.h>
+#include <libscap/engine/bpf/scap_bpf_stats.h>
 
 //
 // ebpf defs
@@ -57,6 +58,7 @@ struct bpf_engine
 	uint64_t m_api_version;
 	uint64_t m_schema_version;
 	bool capturing;
-	scap_stats_v2* m_stats;
+	metrics_v2* m_stats;
 	uint32_t m_nstats;
+	uint64_t m_flags;
 };

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
 Copyright (C) 2023 The Falco Authors.
 
@@ -15,18 +16,18 @@ limitations under the License.
 
 */
 
-#include "attached_prog.h"
+#include <libscap/engine/bpf/attached_prog.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <scap.h>
+#include <libscap/scap.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <errno.h>
-#include <strerror.h>
-#include <compat/misc.h>
-#include <compat/bpf.h>
-#include <compat/perf_event.h>
-#include <strlcpy.h>
+#include <libscap/strerror.h>
+#include <libscap/compat/misc.h>
+#include <libscap/compat/bpf.h>
+#include <libscap/compat/perf_event.h>
+#include <libscap/strl.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 

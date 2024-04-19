@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +18,12 @@ limitations under the License.
 
 #pragma once
 
-#include "settings.h"
+#include <libscap/settings.h>
 
-#if defined(USE_ZLIB) && !defined(UDIG)
+#if defined(USE_ZLIB)
+#ifdef _WIN32
+#define ZLIB_WINAPI
+#endif
 #include <zlib.h>
 #else
 #include <stdio.h>

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,8 +22,8 @@ limitations under the License.
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include "scap_assert.h"
-#include "scap_zlib.h"
+#include <libscap/scap_assert.h>
+#include <libscap/scap_zlib.h>
 
 #ifdef __cplusplus
 extern "C" {

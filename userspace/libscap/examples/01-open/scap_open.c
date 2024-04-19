@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,13 +19,14 @@ limitations under the License.
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-#include <scap.h>
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
-#include "strlcpy.h"
+#include <libscap/strl.h>
+#include <libscap/scap_engines.h>
 
 #define SYSCALL_NAME_MAX_LEN 40
-#define UNKNOWN_ENGINE "unknown"
 
 /* SCAP SOURCES */
 #define KMOD_OPTION "--kmod"
@@ -41,6 +43,7 @@ limitations under the License.
 #define CPUS_FOR_EACH_BUFFER_MODE "--cpus_for_buf"
 #define ALL_AVAILABLE_CPUS_MODE "--available_cpus"
 #define DROP_FAILED "--drop-failed"
+#define VERBOSE_OPTION "--verbose"
 
 /* PRINT */
 #define PRINT_SYSCALLS_OPTION "--print_syscalls"
@@ -50,10 +53,10 @@ extern const struct ppm_event_info g_event_info[PPM_EVENT_MAX];
 extern const struct syscall_evt_pair g_syscall_table[SYSCALL_TABLE_SIZE];
 
 /* Engine params */
-static struct scap_bpf_engine_params bpf_params;
-static struct scap_kmod_engine_params kmod_params;
-static struct scap_modern_bpf_engine_params modern_bpf_params;
-static struct scap_savefile_engine_params savefile_params;
+static struct scap_bpf_engine_params bpf_params = {};
+static struct scap_kmod_engine_params kmod_params = {};
+static struct scap_modern_bpf_engine_params modern_bpf_params = {};
+static struct scap_savefile_engine_params savefile_params = {};
 
 /* Configuration variables set through CLI. */
 static uint64_t num_events = UINT64_MAX; /* max number of events to catch. */
@@ -61,6 +64,7 @@ static int evt_type = -1;		  /* event type to print. */
 static bool ppm_sc_is_set = 0;
 static unsigned long buffer_bytes_dim = DEFAULT_DRIVER_BUFFER_BYTES_DIM;
 static bool drop_failed = false;
+static enum falcosecurity_log_severity severity_level = FALCOSECURITY_LOG_SEV_WARNING;
 
 static int simple_set[] = {
 	PPM_SC_ACCEPT,
@@ -147,8 +151,10 @@ static int simple_set[] = {
 };
 
 /* Generic global variables. */
-static scap_open_args oargs = {.engine_name = UNKNOWN_ENGINE};			    /* scap oargs used in `scap_open`. */
+static scap_open_args oargs = {};						    /* scap oargs used in `scap_open`. */
+static const struct scap_vtable* vtable = NULL;
 static uint64_t g_nevts = 0;							    /* total number of events captured. */
+static uint64_t g_total_number_of_bytes = 0;			/* total dimension of events in bytes. */
 static scap_t* g_h = NULL;							    /* global scap handler. */
 static uint16_t* lens16 = NULL;						    /* pointer used to print the length of event params. */
 static char* valptr = NULL; /* pointer used to print the value of event params. */ /* pointer used to print the value of event params. */
@@ -539,6 +545,7 @@ void print_help()
 	printf("'%s <cpus_for_each_buffer>': allocate a ring buffer for every `cpus_for_each_buffer` CPUs.\n", CPUS_FOR_EACH_BUFFER_MODE);
 	printf("'%s': allocate ring buffers for all available CPUs. Default: allocate ring buffers for online CPUs only.\n", ALL_AVAILABLE_CPUS_MODE);
 	printf("'%s': instrument drivers to drop failed syscalls (exit) events.\n", DROP_FAILED);
+	printf("'%s <level>': print all available logs. Default level is WARNING (4)\n", VERBOSE_OPTION);
 	printf("\n------> PRINT OPTIONS\n");
 	printf("'%s': print all supported syscalls with different sources and configurations.\n", PRINT_SYSCALLS_OPTION);
 	printf("'%s': print this menu.\n", PRINT_HELP_OPTION);
@@ -548,25 +555,36 @@ void print_help()
 void print_scap_source()
 {
 	printf("\n--------------------------- SCAP SOURCE --------------------------\n");
-	if(strcmp(oargs.engine_name, KMOD_ENGINE) == 0)
+	if(false)
+	{
+	}
+#ifdef HAS_ENGINE_KMOD
+	else if(vtable == &scap_kmod_engine)
 	{
 		printf("* Kernel module.\n");
 	}
-	else if(strcmp(oargs.engine_name, BPF_ENGINE) == 0)
+#endif
+#ifdef HAS_ENGINE_BPF
+	else if(vtable == &scap_bpf_engine)
 	{
 		struct scap_bpf_engine_params* params = oargs.engine_params;
 		printf("* BPF probe: '%s'\n", params->bpf_probe);
 	}
-	else if(strcmp(oargs.engine_name, MODERN_BPF_ENGINE) == 0)
+#endif
+#ifdef HAS_ENGINE_MODERN_BPF
+	else if(vtable == &scap_modern_bpf_engine)
 	{
 		struct scap_modern_bpf_engine_params* params = oargs.engine_params;
 		printf("* Modern BPF probe, 1 ring buffer every %d CPUs\n", params->cpus_for_each_buffer);
 	}
-	else if(strcmp(oargs.engine_name, SAVEFILE_ENGINE) == 0)
+#endif
+#ifdef HAS_ENGINE_SAVEFILE
+	else if(vtable == &scap_savefile_engine)
 	{
 		struct scap_savefile_engine_params* params = oargs.engine_params;
 		printf("* Scap file: '%s'.\n", params->fname);
 	}
+#endif
 	else
 	{
 		printf("* Unknown scap source! Bye!\n");
@@ -586,24 +604,35 @@ void print_configurations()
 
 void print_start_capture()
 {
-	if(strcmp(oargs.engine_name, KMOD_ENGINE) == 0)
+	if(false)
+	{
+	}
+#ifdef HAS_ENGINE_KMOD
+	else if(vtable == &scap_kmod_engine)
 	{
 		printf("* OK! Kernel module correctly loaded.\n");
 	}
-	else if(strcmp(oargs.engine_name, BPF_ENGINE) == 0)
+#endif
+#ifdef HAS_ENGINE_BPF
+	else if(vtable == &scap_bpf_engine)
 	{
 		printf("* OK! BPF probe correctly loaded: NO VERIFIER ISSUES :)\n");
 	}
-	else if(strcmp(oargs.engine_name, MODERN_BPF_ENGINE) == 0)
+#endif
+#ifdef HAS_ENGINE_MODERN_BPF
+	else if(vtable == &scap_modern_bpf_engine)
 	{
 		printf("* OK! modern BPF probe correctly loaded: NO VERIFIER ISSUES :)\n");
 	}
-	else if(strcmp(oargs.engine_name, SAVEFILE_ENGINE) == 0)
+#endif
+#ifdef HAS_ENGINE_SAVEFILE
+	else if(vtable == &scap_savefile_engine)
 	{
 		printf("* OK! Ready to read from scap file.\n");
 		printf("\n* Reading from scap file...\n");
 		return;
 	}
+#endif
 	else
 	{
 		printf("Cannot start the capture! Bye\n");
@@ -619,13 +648,15 @@ void parse_CLI_options(int argc, char** argv)
 	{
 		/*=============================== SCAP SOURCES ===========================*/
 
+#ifdef HAS_ENGINE_KMOD
 		if(!strcmp(argv[i], KMOD_OPTION))
 		{
-			oargs.engine_name = KMOD_ENGINE;
-			oargs.mode = SCAP_MODE_LIVE;
+			vtable = &scap_kmod_engine;
 			kmod_params.buffer_bytes_dim = buffer_bytes_dim;
 			oargs.engine_params = &kmod_params;
 		}
+#endif
+#ifdef HAS_ENGINE_BPF
 		if(!strcmp(argv[i], BPF_OPTION))
 		{
 			if(!(i + 1 < argc))
@@ -633,21 +664,23 @@ void parse_CLI_options(int argc, char** argv)
 				printf("\nYou need to specify also the BPF probe path! Bye!\n");
 				exit(EXIT_FAILURE);
 			}
-			oargs.engine_name = BPF_ENGINE;
-			oargs.mode = SCAP_MODE_LIVE;
+			vtable = &scap_bpf_engine;
 			bpf_params.bpf_probe = argv[++i];
 			bpf_params.buffer_bytes_dim = buffer_bytes_dim;
 			oargs.engine_params = &bpf_params;
 		}
+#endif
+#ifdef HAS_ENGINE_MODERN_BPF
 		if(!strcmp(argv[i], MODERN_BPF_OPTION))
 		{
-			oargs.engine_name = MODERN_BPF_ENGINE;
-			oargs.mode = SCAP_MODE_LIVE;
+			vtable = &scap_modern_bpf_engine;
 			modern_bpf_params.buffer_bytes_dim = buffer_bytes_dim;
 			modern_bpf_params.cpus_for_each_buffer = DEFAULT_CPU_FOR_EACH_BUFFER;
 			modern_bpf_params.allocate_online_only = true;
 			oargs.engine_params = &modern_bpf_params;
 		}
+#endif
+#ifdef HAS_ENGINE_SAVEFILE
 		if(!strcmp(argv[i], SCAP_FILE_OPTION))
 		{
 			if(!(i + 1 < argc))
@@ -655,11 +688,11 @@ void parse_CLI_options(int argc, char** argv)
 				printf("\nYou need to specify also the scap file path! Bye!\n");
 				exit(EXIT_FAILURE);
 			}
-			oargs.engine_name = SAVEFILE_ENGINE;
-			oargs.mode = SCAP_MODE_CAPTURE;
+			vtable = &scap_savefile_engine;
 			savefile_params.fname = argv[++i];
 			oargs.engine_params = &savefile_params;
 		}
+#endif
 
 		/*=============================== SCAP SOURCES ===========================*/
 
@@ -730,6 +763,21 @@ void parse_CLI_options(int argc, char** argv)
 			drop_failed = true;
 		}
 
+		if(!strcmp(argv[i], VERBOSE_OPTION))
+		{
+			if(!(i + 1 < argc))
+			{
+				printf("\nYou need to specify also the logging level! Bye!\n");
+				exit(EXIT_FAILURE);
+			}
+			unsigned long level = strtoul(argv[++i], NULL, 10);
+			if(level < FALCOSECURITY_LOG_SEV_FATAL || level > FALCOSECURITY_LOG_SEV_TRACE)
+			{
+				printf("\nInvalid log level! Bye!\n");
+				exit(EXIT_FAILURE);
+			}
+			severity_level = (enum falcosecurity_log_severity)level;
+		}
 
 		/*=============================== CONFIGURATIONS ===========================*/
 
@@ -749,29 +797,46 @@ void parse_CLI_options(int argc, char** argv)
 		/*=============================== PRINT ===========================*/
 	}
 
-	if(strcmp(oargs.engine_name, UNKNOWN_ENGINE) == 0)
+	if(!vtable)
 	{
 		printf("\nSource not specified! Bye!\n");
 		exit(EXIT_FAILURE);
 	}
 }
 
+static inline bool engine_uses_bpf()
+{
+#ifdef HAS_ENGINE_BPF
+	if(vtable == &scap_bpf_engine)
+	{
+		return true;
+	}
+#endif
+#ifdef HAS_ENGINE_MODERN_BPF
+	if(vtable == &scap_modern_bpf_engine)
+	{
+		return true;
+	}
+#endif
+	return false;
+}
+
 void print_stats()
 {
 	gettimeofday(&tval_end, NULL);
 	timersub(&tval_end, &tval_start, &tval_result);
-	uint32_t flags = PPM_SCAP_STATS_KERNEL_COUNTERS | PPM_SCAP_STATS_LIBBPF_STATS;
+	uint32_t flags = METRICS_V2_KERNEL_COUNTERS | METRICS_V2_LIBBPF_STATS;
 	uint32_t nstats;
 	int32_t rc;
-	const scap_stats_v2* stats_v2;
+	const metrics_v2* stats_v2;
 	stats_v2 = scap_get_stats_v2(g_h, flags, &nstats, &rc);
-	const scap_machine_info* scap_machine_info = scap_get_machine_info(g_h);
+	uint64_t engine_flags = scap_get_engine_flags(g_h);
 	uint64_t n_evts = 0;
 	if (stats_v2 && nstats > 0)
 	{
 		for(int stat = 0; stat < nstats; stat++)
 		{
-			if ((strncmp(stats_v2[stat].name, "n_evts", 6) == 0) && stats_v2[0].type == STATS_VALUE_TYPE_U64)
+			if ((strncmp(stats_v2[stat].name, "n_evts", 6) == 0) && stats_v2[0].type == METRIC_VALUE_TYPE_U64)
 			{
 				n_evts = stats_v2[stat].value.u64;
 				break;
@@ -783,6 +848,10 @@ void print_stats()
 
 	printf("\n[SCAP-OPEN]: General statistics\n");
 	printf("\nEvents correctly captured (SCAP_SUCCESS): %" PRIu64 "\n", g_nevts);
+	if(g_nevts!=0)
+	{
+		printf("Average dimension of events: %" PRIu64 " bytes\n", g_total_number_of_bytes/g_nevts);
+	}
 	printf("Seen by driver (kernel side events): %" PRIu64 "\n", n_evts);
 	printf("Time elapsed: %ld s\n", tval_result.tv_sec);
 	if(tval_result.tv_sec != 0)
@@ -795,11 +864,11 @@ void print_stats()
 
 	printf("\n[SCAP-OPEN]: Stats v2.\n");
 	printf("\n[SCAP-OPEN]: %u metrics in total\n", nstats);
-	if((strncmp(oargs.engine_name, BPF_ENGINE, 3) == 0) || (strncmp(oargs.engine_name, MODERN_BPF_ENGINE, 10) == 0))
+	if(engine_uses_bpf())
 	{
 		printf("[SCAP-OPEN]: [1] kernel-side counters\n");
 		printf("[SCAP-OPEN]: [2] libbpf stats (compare to `bpftool prog show` CLI)\n\n");
-		if (!(scap_machine_info->flags & PPM_BPF_STATS_ENABLED))
+		if (!(engine_flags & ENGINE_FLAG_BPF_STATS_ENABLED))
 		{
 			printf("\n[Notice]: `/proc/sys/kernel/bpf_stats_enabled` not enabled, no `libbpf` stats retrieved.\n\n");
 		}
@@ -812,7 +881,7 @@ void print_stats()
 	{
 		for(int stat = 0; stat < nstats; stat++)
 		{
-			if (stats_v2[stat].type == STATS_VALUE_TYPE_U64)
+			if (stats_v2[stat].type == METRIC_VALUE_TYPE_U64)
 			{
 				printf("[%u] %s: %lu\n", stats_v2[stat].flags, stats_v2[stat].name, stats_v2[stat].value.u64);
 			}
@@ -826,8 +895,26 @@ void print_stats()
 
 static void signal_callback(int signal)
 {
+	scap_stop_capture(g_h);
 	print_stats();
+	scap_close(g_h);
 	exit(EXIT_SUCCESS);
+}
+
+void scap_open_log_fn(const char* component, const char* msg, const enum falcosecurity_log_severity sev)
+{
+	if(sev <= severity_level)
+	{
+		if(component!= NULL)
+		{
+			printf("%s: %s", component, msg);
+		}
+		else
+		{
+			// libbpf logs have no components
+			printf("%s", msg);
+		}
+	}
 }
 
 int main(int argc, char** argv)
@@ -836,6 +923,7 @@ int main(int argc, char** argv)
 	int32_t res = 0;
 	scap_evt* ev = NULL;
 	uint16_t cpuid = 0;
+	uint32_t flags = 0;
 
 	printf("\n[SCAP-OPEN]: Hello!\n");
 	if(signal(SIGINT, signal_callback) == SIG_ERR)
@@ -852,11 +940,12 @@ int main(int argc, char** argv)
 
 	enable_sc_and_print();
 
-	g_h = scap_open(&oargs, error, &res);
+	oargs.log_fn = scap_open_log_fn;
+	g_h = scap_open(&oargs, vtable, error, &res);
 	if(g_h == NULL || res != SCAP_SUCCESS)
 	{
 		fprintf(stderr, "%s (%d)\n", error, res);
-		return EXIT_FAILURE;
+		return res;
 	}
 
 	print_start_capture();
@@ -872,7 +961,7 @@ int main(int argc, char** argv)
 
 	while(g_nevts != num_events)
 	{
-		res = scap_next(g_h, &ev, &cpuid);
+		res = scap_next(g_h, &ev, &cpuid, &flags);
 		number_of_scap_next++;
 		if(res == SCAP_UNEXPECTED_BLOCK)
 		{
@@ -902,11 +991,9 @@ int main(int argc, char** argv)
 		{
 			print_event(ev);
 		}
+		g_total_number_of_bytes += ev->len;
 		g_nevts++;
 	}
 
-	scap_stop_capture(g_h);
-	print_stats();
-	scap_close(g_h);
-	return EXIT_SUCCESS;
+	signal_callback(-1);
 }

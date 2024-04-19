@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -14,27 +15,27 @@ int BPF_PROG(shutdown_e,
 	     struct pt_regs *regs,
 	     long id)
 {
-	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SHUTDOWN_E_SIZE))
-	{
-		return 0;
-	}
-
-	ringbuf__store_event_header(&ringbuf, PPME_SOCKET_SHUTDOWN_E);
-
-	/*=============================== COLLECT PARAMETERS  ===========================*/
-
 	/* Collect parameters at the beginning to easily manage socketcalls */
 	unsigned long args[2];
 	extract__network_args(args, 2, regs);
 
+	struct ringbuf_struct ringbuf;
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SHUTDOWN_E_SIZE, PPME_SOCKET_SHUTDOWN_E))
+	{
+		return 0;
+	}
+
+	ringbuf__store_event_header(&ringbuf);
+
+	/*=============================== COLLECT PARAMETERS  ===========================*/
+
 	/* Parameter 1: fd (type: PT_FD) */
-	s32 fd = (s32)args[0];
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)args[0];
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/* Parameter 2: how (type: PT_ENUMFLAGS8) */
-	int how = (s32)args[1];
-	ringbuf__store_u8(&ringbuf, (u8)shutdown_how_to_scap(how));
+	int how = (int32_t)args[1];
+	ringbuf__store_u8(&ringbuf, (uint8_t)shutdown_how_to_scap(how));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -53,12 +54,12 @@ int BPF_PROG(shutdown_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SHUTDOWN_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SHUTDOWN_X_SIZE, PPME_SOCKET_SHUTDOWN_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SOCKET_SHUTDOWN_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

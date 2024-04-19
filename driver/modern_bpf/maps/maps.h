@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -8,7 +9,7 @@
 #pragma once
 
 #include <helpers/base/common.h>
-#include <shared_definitions/struct_definitions.h>
+#include <driver/modern_bpf/shared_definitions/struct_definitions.h>
 #include <driver/ppm_events_public.h>
 #include <driver/driver_config.h>
 
@@ -74,6 +75,12 @@ __weak uint8_t g_64bit_sampling_syscall_table[SYSCALL_TABLE_SIZE];
 __weak uint8_t g_64bit_sampling_tracepoint_table[PPM_EVENT_MAX];
 
 /**
+ * @brief Given the syscall id on 32-bit x86 arch returns
+ * its x64 value. Used to support ia32 syscall emulation.
+ */
+__weak uint32_t g_ia32_to_64_table[SYSCALL_TABLE_SIZE];
+
+/**
  * @brief Global capture settings shared between userspace and
  * bpf programs.
  */
@@ -98,8 +105,8 @@ struct
 {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
 	__uint(max_entries, SYSCALL_TABLE_SIZE);
-	__type(key, u32);
-	__type(value, u32);
+	__type(key, uint32_t);
+	__type(value, uint32_t);
 } syscall_enter_tail_table __weak SEC(".maps");
 
 /**
@@ -111,8 +118,8 @@ struct
 {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
 	__uint(max_entries, SYSCALL_TABLE_SIZE);
-	__type(key, u32);
-	__type(value, u32);
+	__type(key, uint32_t);
+	__type(value, uint32_t);
 } syscall_exit_tail_table __weak SEC(".maps");
 
 /**
@@ -128,8 +135,8 @@ struct
 {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
 	__uint(max_entries, TAIL_EXTRA_EVENT_PROG_MAX);
-	__type(key, u32);
-	__type(value, u32);
+	__type(key, uint32_t);
+	__type(value, uint32_t);
 } extra_event_prog_tail_table __weak SEC(".maps");
 
 /*=============================== BPF_MAP_TYPE_PROG_ARRAY ===============================*/
@@ -156,7 +163,7 @@ struct
 struct
 {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__type(key, u32);
+	__type(key, uint32_t);
 	__type(value, struct auxiliary_map);
 } auxiliary_maps __weak SEC(".maps");
 
@@ -168,7 +175,7 @@ struct
 struct
 {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__type(key, u32);
+	__type(key, uint32_t);
 	__type(value, struct counter_map);
 } counter_maps __weak SEC(".maps");
 
@@ -192,8 +199,8 @@ struct ringbuf_map
 struct
 {
 	__uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
-	__type(key, u32);
-	__type(value, u32);
+	__type(key, uint32_t);
+	__type(value, uint32_t);
 	__array(values, struct ringbuf_map);
 } ringbuf_maps __weak SEC(".maps");
 

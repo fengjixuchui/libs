@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,10 +18,10 @@ limitations under the License.
 #pragma once
 
 #include <stdint.h>
-#include "ringbuffer/devset.h"
-#include "scap_open.h"
-#include "scap_stats_v2.h"
-#include "scap_kmod_stats.h"
+#include <libscap/ringbuffer/devset.h>
+#include <libscap/scap_open.h>
+#include <libscap/metrics_v2.h>
+#include <libscap/engine/kmod/scap_kmod_stats.h>
 
 
 struct kmod_engine
@@ -31,5 +32,5 @@ struct kmod_engine
 	uint64_t m_api_version;
 	uint64_t m_schema_version;
 	bool capturing;
-	scap_stats_v2 m_stats[KMOD_MAX_KERNEL_COUNTERS_STATS];
+	metrics_v2 m_stats[KMOD_MAX_KERNEL_COUNTERS_STATS];
 };

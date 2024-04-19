@@ -1,3 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright (C) 2023 The Falco Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations under the License.
+#
+
 option(USE_BUNDLED_CARES "Enable building of the bundled c-ares" ${USE_BUNDLED_DEPS})
 
 if(CARES_INCLUDE)
@@ -29,13 +43,13 @@ else()
 		message(STATUS "Using bundled c-ares in '${CARES_SRC}'")
 		ExternalProject_Add(c-ares
 			PREFIX "${PROJECT_BINARY_DIR}/c-ares-prefix"
-			URL "https://c-ares.haxx.se/download/c-ares-1.18.1.tar.gz"
-			URL_HASH "SHA256=1a7d52a8a84a9fbffb1be9133c0f6e17217d91ea5a6fa61f6b4729cda78ebbcf"
+			URL "https://c-ares.haxx.se/download/c-ares-1.19.1.tar.gz"
+			URL_HASH "SHA256=321700399b72ed0e037d0074c629e7741f6b2ec2dda92956abe3e9671d3e268e"
 			CONFIGURE_COMMAND CPPFLAGS=${CARES_CPPFLAGS} ./configure ${CARES_STATIC_OPTION} --prefix=${CARES_INSTALL_DIR}
-			BUILD_COMMAND ${CMD_MAKE}
+			BUILD_COMMAND make
 			BUILD_IN_SOURCE 1
 			BUILD_BYPRODUCTS ${CARES_INCLUDE} ${CARES_LIB}
-			INSTALL_COMMAND ${CMD_MAKE} install)
+			INSTALL_COMMAND make install)
 		install(FILES "${CARES_LIB}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/${LIBS_PACKAGE_NAME}"
 				COMPONENT "libs-deps")
 		install(DIRECTORY "${CARES_INCLUDE}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}"

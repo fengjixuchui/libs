@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +25,7 @@ limitations under the License.
 #include <list>
 #include <string>
 #include <vector>
-#include "container_engine/sinsp_container_type.h"
+#include <libsinsp/container_engine/sinsp_container_type.h>
 #include "json/json.h"
 
 class sinsp;
@@ -37,8 +38,6 @@ template<> struct hash<sinsp_container_type> {
 	}
 };
 }
-
-class sinsp_threadinfo;
 
 // Docker and CRI-compatible runtimes are very similar
 static inline bool is_docker_compatible(sinsp_container_type t)
@@ -56,7 +55,7 @@ public:
 	sinsp_container_lookup(short max_retry = 3, short max_delay_ms = 500):
 		m_max_retry(max_retry),
 		m_max_delay_ms(max_delay_ms),
-		m_state(state::SUCCESSFUL),
+		m_state(state::FAILED),
 		m_retry(0)
 	{
 		assert(max_retry >= 0);
@@ -133,7 +132,7 @@ public:
 private:
 	short m_max_retry;
 	short m_max_delay_ms;
-	state m_state = state::SUCCESSFUL;
+	state m_state = state::FAILED;
 	short m_retry;
 };
 
@@ -257,6 +256,7 @@ public:
 	};
 
 	sinsp_container_info(sinsp_container_lookup &&lookup = sinsp_container_lookup()):
+		m_type(CT_UNKNOWN),
 		m_container_ip(0),
 		m_privileged(false),
 		m_memory_limit(0),
@@ -328,7 +328,9 @@ public:
 	int64_t m_cpu_period;
 	int32_t m_cpuset_cpu_count;
 	std::list<container_health_probe> m_health_probes;
-	std::string m_pod_cniresult;
+	std::string m_pod_sandbox_id;
+	std::map<std::string, std::string> m_pod_sandbox_labels;
+	std::string m_pod_sandbox_cniresult;
 
 	bool m_is_pod_sandbox;
 
@@ -352,7 +354,7 @@ public:
 	int64_t m_created_time;
 
 	/**
-	 * The max container label length value. This is static because it is 
+	 * The max container label length value. This is static because it is
 	 * universal across all instances and needs to be set once only.
 	 */
 	static uint32_t m_container_label_max_length;

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -12,6 +13,8 @@ limitations under the License.
 */
 
 #pragma once
+
+#include <libscap/scap_procs.h>
 
 #define GVISOR_ENGINE "gvisor"
 
@@ -26,7 +29,12 @@ extern "C"
 		const char* gvisor_config_path; ///< When using gvisor, the path to the configuration file
 
 		bool no_events; //< Pinky swear we don't want any event from it (i.e. next will always fail, just have proc scan)
+		int gvisor_epoll_timeout;	///< When using gvisor, the timeout to wait for a new event
+		struct scap_gvisor_platform *gvisor_platform; ///< The gvisor engine and platform have a bit of shared state
 	};
+
+	struct scap_platform;
+	struct scap_platform* scap_gvisor_alloc_platform(proc_entry_callback proc_callback, void* proc_callback_context);
 
 #ifdef __cplusplus
 };

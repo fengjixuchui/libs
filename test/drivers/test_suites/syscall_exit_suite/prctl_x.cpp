@@ -125,7 +125,7 @@ TEST(SyscallExit, prctlX_set_child_subreaper)
 	/*=============================== TRIGGER SYSCALL  ===========================*/
 
 	int option = PR_SET_CHILD_SUBREAPER;
-	unsigned long arg2 = 1337;
+	unsigned long arg2 = 1337; /* This could be whatever value != 0, it is not a tid */
 	unsigned long arg3 = 0;
 	unsigned long arg4 = 0;
 	unsigned long arg5 = 0;
@@ -133,7 +133,7 @@ TEST(SyscallExit, prctlX_set_child_subreaper)
 	/* We need to use `SIGCHLD` otherwise the parent won't receive any signal
 	 * when the child terminates.
 	 */
-	struct clone_args cl_args = {0};
+	clone_args cl_args = {};
 	cl_args.exit_signal = SIGCHLD;
 
 	pid_t ret_pid = syscall(__NR_clone3, &cl_args, sizeof(cl_args));
@@ -209,7 +209,7 @@ TEST(SyscallExit, prctlX_set_name)
 	/* We need to use `SIGCHLD` otherwise the parent won't receive any signal
 	 * when the child terminates.
 	 */
-	struct clone_args cl_args = {0};
+	clone_args cl_args = {};
 	cl_args.exit_signal = SIGCHLD;
 
 	pid_t ret_pid = syscall(__NR_clone3, &cl_args, sizeof(cl_args));

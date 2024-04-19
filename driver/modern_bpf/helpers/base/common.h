@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -21,16 +22,22 @@
  * to the others `PT_REGS_PARAM...`
  */
 
+#ifndef PT_REGS_PARM6_CORE_SYSCALL
+
 #if defined(bpf_target_x86)
 #define __PT_PARM6_REG r9
 #elif defined(bpf_target_arm64)
 #define __PT_PARM6_REG regs[5]
 #elif defined(bpf_target_s390)
 #define __PT_PARM6_REG gprs[7]
+#elif defined(bpf_target_powerpc)
+#define __PT_PARM6_REG gpr[8]
 #endif
 
 #define PT_REGS_PARM6_CORE(x) BPF_CORE_READ(__PT_REGS_CAST(x), __PT_PARM6_REG)
 #define PT_REGS_PARM6_CORE_SYSCALL(x) PT_REGS_PARM6_CORE(x)
+
+#endif
 
 /*=============================== LIBBPF MISSING TRACING DEFINITION ===========================*/
 

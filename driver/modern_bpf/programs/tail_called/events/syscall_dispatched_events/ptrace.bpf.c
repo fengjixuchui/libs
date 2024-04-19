@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -16,12 +17,12 @@ int BPF_PROG(ptrace_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, PTRACE_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, PTRACE_E_SIZE, PPME_SYSCALL_PTRACE_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_PTRACE_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -30,8 +31,8 @@ int BPF_PROG(ptrace_e,
 	ringbuf__store_u16(&ringbuf, ptrace_requests_to_scap(request));
 
 	/* Parameter 2: pid (type: PT_PID) */
-	pid_t pid = (s32)extract__syscall_argument(regs, 1);
-	ringbuf__store_s64(&ringbuf, (s64)pid);
+	pid_t pid = (int32_t)extract__syscall_argument(regs, 1);
+	ringbuf__store_s64(&ringbuf, (int64_t)pid);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -64,14 +65,14 @@ int BPF_PROG(ptrace_x,
 
 	/* We need the ptrace request type to understand how to parse `addr` and `data` */
 	unsigned long request = extract__syscall_argument(regs, 0);
-	u16 scap_ptrace_request = ptrace_requests_to_scap(request);
+	uint16_t scap_ptrace_request = ptrace_requests_to_scap(request);
 
 	/* Parameter 2: addr (type: PT_DYN) */
-	u64 addr_pointer = (u64)extract__syscall_argument(regs, 2);
+	uint64_t addr_pointer = (uint64_t)extract__syscall_argument(regs, 2);
 	auxmap__store_ptrace_addr_param(auxmap, ret, addr_pointer);
 
 	/* Parameter 3: data (type: PT_DYN) */
-	u64 data_pointer = (u64)extract__syscall_argument(regs, 3);
+	uint64_t data_pointer = (uint64_t)extract__syscall_argument(regs, 3);
 	auxmap__store_ptrace_data_param(auxmap, ret, scap_ptrace_request, data_pointer);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

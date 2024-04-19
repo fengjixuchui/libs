@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
-* Copyright (C) 2022 The Falco Authors.
+* Copyright (C) 2023 The Falco Authors.
 *
 * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 * or GPL2.txt for full copies of the license.
@@ -15,17 +16,17 @@ int BPF_PROG(epoll_create_e,
 	    long id)
 {
        struct ringbuf_struct ringbuf;
-       if(!ringbuf__reserve_space(&ringbuf, ctx, EPOLL_CREATE_E_SIZE))
+       if(!ringbuf__reserve_space(&ringbuf, ctx, EPOLL_CREATE_E_SIZE, PPME_SYSCALL_EPOLL_CREATE_E))
        {
 	       return 0;
        }
 
-       ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_EPOLL_CREATE_E);
+       ringbuf__store_event_header(&ringbuf);
 
        /*=============================== COLLECT PARAMETERS  ===========================*/
 
        /* Parameter 1: size (type: PT_INT32) */
-       s32 size = (s32)extract__syscall_argument(regs, 0);
+       int32_t size = (int32_t)extract__syscall_argument(regs, 0);
        ringbuf__store_s32(&ringbuf, size);
 
        /*=============================== COLLECT PARAMETERS  ===========================*/
@@ -45,12 +46,12 @@ int BPF_PROG(epoll_create_x,
 	    long ret)
 {
        struct ringbuf_struct ringbuf;
-       if(!ringbuf__reserve_space(&ringbuf, ctx, EPOLL_CREATE_X_SIZE))
+       if(!ringbuf__reserve_space(&ringbuf, ctx, EPOLL_CREATE_X_SIZE, PPME_SYSCALL_EPOLL_CREATE_X))
        {
 	       return 0;
        }
 
-       ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_EPOLL_CREATE_X);
+       ringbuf__store_event_header(&ringbuf);
 
        /*=============================== COLLECT PARAMETERS  ===========================*/
 

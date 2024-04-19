@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,10 +20,11 @@ limitations under the License.
 
 #include <stdint.h>
 #include "events_prog_names.h"
-#include <scap.h>
+#include <libscap/scap.h>
 
 extern const struct ppm_event_info g_event_info[PPM_EVENT_MAX];
 extern const struct syscall_evt_pair g_syscall_table[SYSCALL_TABLE_SIZE];
+extern const int g_ia32_64_map[];
 
 /*=============================== BPF READ-ONLY GLOBAL VARIABLES ===============================*/
 
@@ -142,6 +144,19 @@ void pman_fill_syscall_tracepoint_table()
 	g_state.skel->bss->g_64bit_sampling_tracepoint_table[PPME_SIGNALDELIVER_E] = UF_ALWAYS_DROP;
 }
 
+void pman_fill_ia32_to_64_table()
+{
+	for(int syscall_id = 0; syscall_id < SYSCALL_TABLE_SIZE; syscall_id++)
+	{
+		// Note: we will map all syscalls from the upper limit of the ia32 table
+		// up to SYSCALL_TABLE_SIZE to 0 (because they are not set in the g_ia32_64_map).
+		// 0 is read on x86_64; this is not a problem though because
+		// we will never receive a 32bit syscall above the upper limit, since it won't be existent.
+		const int x64_val = g_ia32_64_map[syscall_id];
+		g_state.skel->bss->g_ia32_to_64_table[syscall_id] = x64_val;
+	}
+}
+
 
 /*=============================== BPF GLOBAL VARIABLES ===============================*/
 
@@ -157,7 +172,7 @@ static int add_bpf_program_to_tail_table(int tail_table_fd, const char* bpf_prog
 	if(!bpf_prog)
 	{
 		snprintf(error_message, MAX_ERROR_MESSAGE_LEN, "unable to find BPF program '%s'", bpf_prog_name);
-		pman_print_error((const char*)error_message);
+		pman_print_msg(FALCOSECURITY_LOG_SEV_DEBUG, (const char*)error_message);
 
 		/*
 		 * It's not a hard failure, as programs could be excluded from the
@@ -357,6 +372,7 @@ int pman_finalize_maps_after_loading()
 	/* We have to fill all ours tail tables. */
 	pman_fill_syscall_sampling_table();
 	pman_fill_syscall_tracepoint_table();
+	pman_fill_ia32_to_64_table();
 	err = pman_fill_syscalls_tail_table();
 	err = err ?: pman_fill_extra_event_prog_tail_table();
 	return err;

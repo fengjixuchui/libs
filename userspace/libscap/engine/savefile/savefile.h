@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,10 +19,10 @@ limitations under the License.
 
 #include <stdint.h>
 #include <stddef.h>
-#include "scap_const.h"
-#include "scap_limits.h"
-#include "scap_reader.h"
-#include "scap_savefile.h"
+#include <libscap/scap_const.h>
+#include <libscap/scap_limits.h>
+#include <libscap/engine/savefile/scap_reader.h>
+#include <libscap/scap_savefile.h>
 
 #define READER_BUF_SIZE (1 << 16) // UINT16_MAX + 1, ie: 65536
 
@@ -62,8 +63,6 @@ limitations under the License.
 #if defined _MSC_VER
 #pragma pack(push)
 #pragma pack(1)
-#elif defined __sun
-#pragma pack(1)
 #else
 #pragma pack(push, 1)
 #endif
@@ -94,11 +93,9 @@ typedef struct scap_ifinfo_ipv6_nolinkspeed
 	char ifname[SCAP_MAX_PATH_SIZE];
 }scap_ifinfo_ipv6_nolinkspeed;
 
-#if defined __sun
-#pragma pack()
-#else
 #pragma pack(pop)
-#endif
+
+struct scap_platform;
 
 struct savefile_engine
 {
@@ -109,5 +106,6 @@ struct savefile_engine
 	char* m_reader_evt_buf;
 	size_t m_reader_evt_buf_size;
 	uint32_t m_last_evt_dump_flags;
+	struct scap_platform* m_platform;
 };
 

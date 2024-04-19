@@ -1,3 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only OR MIT
+#
+# Copyright (C) 2023 The Falco Authors.
+#
+# This file is dual licensed under either the MIT or GPL 2. See
+# MIT.txt or GPL.txt for full copies of the license.
+#
+
 option(MODERN_BPF_DEBUG_MODE "Enable BPF debug prints" OFF)
 option(MODERN_BPF_EXCLUDE_PROGS "Regex to exclude tail-called programs" "")
 
@@ -23,6 +31,7 @@ string(REGEX MATCH "[0-9]+.[0-9]+" LINUX_KERNEL_VERSION ${UNAME_RESULT})
 set(modern_bpf_min_kver_map_x86_64 5.8)
 set(modern_bpf_min_kver_map_aarch64 5.8)
 set(modern_bpf_min_kver_map_s390x 5.8)
+set(modern_bpf_min_kver_map_ppc64le 5.8)
 if (LINUX_KERNEL_VERSION VERSION_LESS ${modern_bpf_min_kver_map_${CMAKE_HOST_SYSTEM_PROCESSOR}})
   message(WARNING "${MODERN_BPF_LOG_PREFIX} To run this driver you need a Linux kernel version >= ${modern_bpf_min_kver_map_${CMAKE_HOST_SYSTEM_PROCESSOR}} but actual kernel version is: ${UNAME_RESULT}")
 endif()
@@ -60,7 +69,8 @@ execute_process(COMMAND ${MODERN_CLANG_EXE} --version
   OUTPUT_VARIABLE CLANG_version_output
   ERROR_VARIABLE CLANG_version_error
   RESULT_VARIABLE CLANG_version_result
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
 if(${CLANG_version_result} EQUAL 0)
   if("${CLANG_version_output}" MATCHES "clang version ([^\n]+)\n")
@@ -99,45 +109,24 @@ endif()
 get_filename_component(MODERN_BPFTOOL_EXE "${MODERN_BPFTOOL_EXE}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
 message(STATUS "${MODERN_BPF_LOG_PREFIX} bpftool used by the modern bpf probe: '${MODERN_BPFTOOL_EXE}'")
 
-# Check the right bpftool version (>=5.13)
-# Note that the output of `bpftool --version` is in this form `vM.m.p`, we have a `v` before the semver
-execute_process(COMMAND ${MODERN_BPFTOOL_EXE} --version
+# Check the right bpftool version
+# Since we want bpftool to have the gen skeleton subcommands and both
+# gen and skeleton were added together, we can just grep the help
+# output for gen. see:
+#   https://lore.kernel.org/bpf/20191210011438.4182911-12-andriin@fb.com/
+#
+# This is not as strict as checking versions, but it also allows
+# compiling on bpftool versions for backported kernels.
+execute_process(COMMAND sh -c "${MODERN_BPFTOOL_EXE} help 2>&1 | grep -wq 'gen'"
   OUTPUT_VARIABLE BPFTOOL_version_output
   ERROR_VARIABLE BPFTOOL_version_error
   RESULT_VARIABLE BPFTOOL_version_result
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
-if(${BPFTOOL_version_result} EQUAL 0)
-  if("${BPFTOOL_version_output}" MATCHES "bpftool v([^\n]+)\n")
-    # Transform X.Y.Z into X;Y;Z which can then be interpreted as a list
-    set(BPFTOOL_VERSION "${CMAKE_MATCH_1}")
-    string(REPLACE "." ";" BPFTOOL_VERSION_LIST ${BPFTOOL_VERSION})
-    list(GET BPFTOOL_VERSION_LIST 0 BPFTOOL_VERSION_MAJOR)
-
-    string(COMPARE LESS ${BPFTOOL_VERSION_MAJOR} 5 BPFTOOL_VERSION_MAJOR_LT5)
-
-    if(${BPFTOOL_VERSION_MAJOR_LT5})
-      message(WARNING "${MODERN_BPF_LOG_PREFIX} bpftool '${BPFTOOL_VERSION}' is too old for compiling the modern BPF probe, you need at least '5.13.0' version")
-    endif()
-
-    string(COMPARE EQUAL ${BPFTOOL_VERSION_MAJOR} 5 BPFTOOL_VERSION_MAJOR_EQ5)
-
-    if(${BPFTOOL_VERSION_MAJOR_EQ5})
-      list(GET BPFTOOL_VERSION_LIST 1 BPFTOOL_VERSION_MINOR)
-      string(COMPARE LESS ${BPFTOOL_VERSION_MINOR} 13 BPFTOOL_VERSION_MINOR_LT13)
-      if(${BPFTOOL_VERSION_MINOR_LT13})
-        message(WARNING "${MODERN_BPF_LOG_PREFIX} bpftool '${BPFTOOL_VERSION}' is too old for compiling the modern BPF probe, you need at least '5.13.0' version")
-      endif()  
-    endif()
-
-    message(STATUS "${MODERN_BPF_LOG_PREFIX} Found bpftool version: ${BPFTOOL_VERSION}")
-  else()
-    message(WARNING "${MODERN_BPF_LOG_PREFIX} Failed to parse bpftool version string: ${BPFTOOL_version_output}")
-  endif()
-else()
-  message(FATAL_ERROR "${MODERN_BPF_LOG_PREFIX} Command \"${MODERN_BPFTOOL_EXE} --version\" failed with output:\n ${BPFTOOL_version_error}")
+if(NOT ${BPFTOOL_version_result} EQUAL 0)
+    message(WARNING "${MODERN_BPF_LOG_PREFIX} bpftool does not support gen command")
 endif()
-
 
 ########################
 # Get clang bpf system includes
@@ -149,9 +138,11 @@ execute_process(
   OUTPUT_VARIABLE CLANG_SYSTEM_INCLUDES_output
   ERROR_VARIABLE CLANG_SYSTEM_INCLUDES_error
   RESULT_VARIABLE CLANG_SYSTEM_INCLUDES_result
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
 if(${CLANG_SYSTEM_INCLUDES_result} EQUAL 0)
-  string(REPLACE "\n" " " CLANG_SYSTEM_INCLUDES ${CLANG_SYSTEM_INCLUDES_output})
+  string(REPLACE "\n" " " CLANG_SYSTEM_INCLUDES "${CLANG_SYSTEM_INCLUDES_output}")
   message(STATUS "${MODERN_BPF_LOG_PREFIX} BPF system include flags: ${CLANG_SYSTEM_INCLUDES}")
 else()
   message(FATAL_ERROR "${MODERN_BPF_LOG_PREFIX} Failed to determine BPF system includes: ${CLANG_SYSTEM_INCLUDES_error}")
@@ -170,7 +161,9 @@ execute_process(COMMAND uname -m
   OUTPUT_VARIABLE ARCH_output
   ERROR_VARIABLE ARCH_error
   RESULT_VARIABLE ARCH_result
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
 if(${ARCH_result} EQUAL 0)
   set(ARCH ${ARCH_output})
   message(STATUS "${MODERN_BPF_LOG_PREFIX} Target arch: ${ARCH}")
@@ -183,11 +176,11 @@ endif()
 ########################
 
 # Get modern probe include.
-set(MODERN_PROBE_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR})
+list(APPEND MODERN_PROBE_INCLUDE "-I${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Note here we use the libs root directory since we want to avoid conflicts between the `bpf` folder inside
 # `driver` and the `libbpf` includes.
-set(PPM_INCLUDE ${LIBSCAP_DIR})
+set(PPM_INCLUDE ${LIBS_DIR})
 
 ## Set CLANG FLAGS
 set(CLANG_FLAGS "")
@@ -198,10 +191,12 @@ list(APPEND CLANG_FLAGS
     -D__TARGET_ARCH_${ARCH} # Match libbpf usage in `/libbpf/src/bpf_tracing.h`
     -D__USE_VMLINUX__ # Used to compile without kernel headers.
     -I${LIBBPF_INCLUDE}
-    -I${MODERN_PROBE_INCLUDE}
+    ${MODERN_PROBE_INCLUDE}
     -I${PPM_INCLUDE}
     -isystem
 )
+
+message(STATUS "${MODERN_BPF_LOG_PREFIX} Compilation flags: ${CLANG_FLAGS}")
 
 ## Search all bpf includes files. (we can use bpf.h files)
 file(GLOB_RECURSE BPF_H_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
@@ -225,9 +220,6 @@ foreach(BPF_C_FILE ${BPF_C_FILES})
 
     set(BPF_O_FILE ${CMAKE_CURRENT_BINARY_DIR}/${file_stem}.bpf.o)
 
-## TODO: we need to clean this!
-## Please note: that the `libbpf` target exists only if we use `USE_BUNDLED_LIBBPF`
-if(USE_BUNDLED_LIBBPF)
     add_custom_command(
         OUTPUT ${BPF_O_FILE}
         COMMAND ${MODERN_CLANG_EXE} ${CLANG_FLAGS} ${CLANG_SYSTEM_INCLUDES} -c ${BPF_C_FILE} -o ${BPF_O_FILE}
@@ -236,15 +228,6 @@ if(USE_BUNDLED_LIBBPF)
         DEPENDS ${BPF_C_FILE} ${BPF_H_FILES}
         COMMENT "${MODERN_BPF_LOG_PREFIX} Building BPF object: ${BPF_O_FILE}"
     )
-else()
-    add_custom_command(
-      OUTPUT ${BPF_O_FILE}
-      COMMAND ${MODERN_CLANG_EXE} ${CLANG_FLAGS} ${CLANG_SYSTEM_INCLUDES} -c ${BPF_C_FILE} -o ${BPF_O_FILE}
-      VERBATIM
-      DEPENDS ${BPF_C_FILE} ${BPF_H_FILES}
-      COMMENT "${MODERN_BPF_LOG_PREFIX} Building BPF object: ${BPF_O_FILE}"
-    )
-endif()
 
     list(APPEND BPF_OBJECT_FILES ${BPF_O_FILE})
 endforeach()
@@ -279,5 +262,4 @@ add_custom_command(
 # Add the skeleton as a custom target
 ########################
 
-set(BPF_SKEL_TARGET ProbeSkeleton)
-add_custom_target(${BPF_SKEL_TARGET} ALL DEPENDS ${BPF_SKEL_FILE})
+add_custom_target(ProbeSkeleton ALL DEPENDS ${BPF_SKEL_FILE})

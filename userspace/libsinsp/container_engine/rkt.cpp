@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,12 +16,12 @@ limitations under the License.
 
 */
 
-#include "container_engine/rkt.h"
+#include <libsinsp/container_engine/rkt.h>
 
 #include <unistd.h>
 
-#include "sinsp.h"
-#include "sinsp_int.h"
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
 
 using namespace libsinsp::container_engine;
 
@@ -71,12 +72,10 @@ bool rkt::match(container_cache_interface *cache, sinsp_threadinfo *tinfo, sinsp
 				// an entry in /var/lib/rkt. In capture mode only the former will be used.
 				// In live mode former will be used only if we already hit that container
 				bool is_rkt_pod_id_valid = cache->container_exists(rkt_podid + ":" + rkt_appname); // if it's already on our table
-#ifdef HAS_CAPTURE
 				if(!is_rkt_pod_id_valid && query_os_for_missing_info)
 				{
 					is_rkt_pod_id_valid = (access(image_manifest_path, F_OK) == 0);
 				}
-#endif
 				if(is_rkt_pod_id_valid)
 				{
 					container_info.m_type = CT_RKT;
@@ -189,6 +188,7 @@ bool rkt::rkt::resolve(sinsp_threadinfo* tinfo, bool query_os_for_missing_info)
 
 	if (have_rkt)
 	{
+		container.set_lookup_status(sinsp_container_lookup::state::SUCCESSFUL);
 		cache->add_container(std::make_shared<sinsp_container_info>(container), tinfo);
 		cache->notify_new_container(container, tinfo);
 		return true;

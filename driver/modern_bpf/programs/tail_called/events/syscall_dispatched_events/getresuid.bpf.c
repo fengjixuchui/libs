@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -15,12 +16,12 @@ int BPF_PROG(getresuid_e,
 	     long id)
 {
         struct ringbuf_struct ringbuf;
-        if(!ringbuf__reserve_space(&ringbuf, ctx, GETRESUID_E_SIZE))
+        if(!ringbuf__reserve_space(&ringbuf, ctx, GETRESUID_E_SIZE, PPME_SYSCALL_GETRESUID_E))
         {
                 return 0;
         }
 
-        ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_GETRESUID_E);
+        ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -41,12 +42,12 @@ int BPF_PROG(getresuid_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-        if(!ringbuf__reserve_space(&ringbuf, ctx, GETRESUID_X_SIZE))
+        if(!ringbuf__reserve_space(&ringbuf, ctx, GETRESUID_X_SIZE, PPME_SYSCALL_GETRESUID_X))
         {
                 return 0;
         }
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_GETRESUID_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -57,19 +58,19 @@ int BPF_PROG(getresuid_x,
 	unsigned long ruid_pointer = extract__syscall_argument(regs, 0);
 	uid_t ruid;
 	bpf_probe_read_user((void *)&ruid, sizeof(ruid), (void *)ruid_pointer);
-	ringbuf__store_u32(&ringbuf, (u32)ruid);
+	ringbuf__store_u32(&ringbuf, (uint32_t)ruid);
 
 	/* Parameter 3: euid (type: PT_UID) */
 	unsigned long euid_pointer = extract__syscall_argument(regs, 1);
 	uid_t euid;
 	bpf_probe_read_user((void *)&euid, sizeof(euid), (void *)euid_pointer);
-	ringbuf__store_u32(&ringbuf, (u32)euid);
+	ringbuf__store_u32(&ringbuf, (uint32_t)euid);
 
 	/* Parameter 4: suid (type: PT_UID) */
 	unsigned long suid_pointer = extract__syscall_argument(regs, 2);
 	uid_t suid;
 	bpf_probe_read_user((void *)&suid, sizeof(suid), (void *)suid_pointer);
-	ringbuf__store_u32(&ringbuf, (u32)suid);
+	ringbuf__store_u32(&ringbuf, (uint32_t)suid);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

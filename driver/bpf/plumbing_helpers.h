@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -15,10 +16,7 @@ or GPL2.txt for full copies of the license.
 
 #include "types.h"
 #include "builtins.h"
-
-#ifdef CAPTURE_SOCKETCALL
-#include <linux/net.h>
-#endif
+#include "socketcall_to_syscall.h"
 
 #define _READ(P) ({ typeof(P) _val;					\
 		    bpf_probe_read_kernel(&_val, sizeof(_val), &P);	\
@@ -94,6 +92,71 @@ static __always_inline long bpf_syscall_get_retval(void *ctx)
 	return args->ret;
 }
 
+static __always_inline bool bpf_in_ia32_syscall()
+{
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	uint32_t status = 0;
+
+#ifndef CONFIG_THREAD_INFO_IN_TASK
+	// If task_struct has no embedded thread_info,
+	// we cannot deduce anything. Just return.
+	// NOTE: this means that emulated 32bit syscalls will
+	// be parsed as 64bits syscalls.
+	// However, our minimum supported kernel releases
+	// already enforce that CONFIG_THREAD_INFO_IN_TASK is defined,
+	// therefore we already show a warning to the user
+	// when building against an unsupported kernel release.
+#warning "bpf_in_ia32_syscall() support disabled since CONFIG_THREAD_INFO_IN_TASK is undefined."
+	return false;
+#elif CONFIG_X86_64
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 18)
+	status = _READ(task->thread.status);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
+	status = _READ(task->thread_info.status);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 2)
+	status = _READ(task->thread.status);
+#else
+	status = _READ(task->thread_info.status);
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 18) */
+
+	/* See here for the definition:
+	 * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/x86/include/asm/thread_info.h#L212
+	 */
+	return status & TS_COMPAT;
+
+#elif defined(CONFIG_ARM64)
+
+	/* See here for the definition:
+	 * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/arm64/include/asm/thread_info.h#L99
+	 */
+	status = _READ(task->thread_info.flags);
+	return status & _TIF_32BIT;
+
+#elif defined(CONFIG_S390)
+
+	/* See here for the definition:
+	 * https://github.com/torvalds/linux/blob/69cb6c6556ad89620547318439d6be8bb1629a5a/arch/s390/include/asm/thread_info.h#L101
+	 */
+	status = _READ(task->thread_info.flags);
+	return status & _TIF_31BIT;
+
+#elif defined(CONFIG_PPC64)
+
+	/* See here for the definition:
+	 * https://github.com/torvalds/linux/blob/9b6de136b5f0158c60844f85286a593cb70fb364/arch/powerpc/include/asm/thread_info.h#L127
+	 */
+	status = _READ(task->thread_info.flags);
+	return status & _TIF_32BIT;
+
+#else
+
+	/* Unknown architecture. */
+	return false;
+
+#endif /* CONFIG_X86_64 */
+}
+
 /* Can be called from both enter and exit event, id is at the same
  * offset in both struct sys_enter_args and struct sys_exit_args
  */
@@ -127,6 +190,13 @@ static __always_inline long bpf_syscall_get_nr(void *ctx)
 	 */
 	id = _READ(regs->int_code);
 	id = id & 0xffff;
+
+#elif CONFIG_PPC64
+
+	/* See here for the definition:
+	 * https://github.com/torvalds/linux/blob/f1a09972a45ae63efbd1587337c4be13b1893330/arch/powerpc/include/asm/syscall.h#L37
+	 */
+	id = _READ(regs->gpr[0]);
 
 #endif /* CONFIG_X86_64 */
 
@@ -165,6 +235,32 @@ static __always_inline unsigned long bpf_syscall_get_argument_from_ctx(void *ctx
 	struct pt_regs *regs = (struct pt_regs *)args->regs;
 
 #ifdef CONFIG_X86_64
+	if (bpf_in_ia32_syscall())
+	{
+		switch (idx) {
+		case 0:
+			arg = _READ(regs->bx);
+			break;
+		case 1:
+			arg = _READ(regs->cx);
+			break;
+		case 2:
+			arg = _READ(regs->dx);
+			break;
+		case 3:
+			arg = _READ(regs->si);
+			break;
+		case 4:
+			arg = _READ(regs->di);
+			break;
+		case 5:
+			arg = _READ(regs->bp);
+			break;
+		default:
+			arg = 0;
+		}
+		return arg;
+	}
 
 	/* See here for the definition:
 	 * https://github.com/libbpf/libbpf/blob/master/src/bpf_tracing.h#L75-L87
@@ -234,6 +330,26 @@ static __always_inline unsigned long bpf_syscall_get_argument_from_ctx(void *ctx
 		arg = 0;
 	}
 
+#elif CONFIG_PPC64
+
+	/* See here for the definition:
+	 * https://github.com/libbpf/libbpf/blob/master/src/bpf_tracing.h#L290-L306
+	 */
+	switch (idx) {
+	case 0:
+		arg = _READ(regs->orig_gpr3);
+		break;
+	case 1:
+	case 2:
+	case 3:
+	case 4:
+	case 5:
+		arg = _READ(regs->gpr[idx+3]);
+		break;
+	default:
+		arg = 0;
+	}
+
 #endif /* CONFIG_X86_64 */
 
 #else
@@ -249,31 +365,33 @@ static __always_inline unsigned long bpf_syscall_get_argument_from_ctx(void *ctx
 	return arg;
 }
 
-#ifdef CAPTURE_SOCKETCALL
 static __always_inline unsigned long bpf_syscall_get_socketcall_arg(void *ctx, int idx)
 {
 	unsigned long arg = 0;
 	unsigned long args_pointer = 0;
 
 	args_pointer = bpf_syscall_get_argument_from_ctx(ctx, 1);
-	bpf_probe_read_user(&arg, sizeof(unsigned long), (void*)(args_pointer + (idx * sizeof(unsigned long))));
-
+	if (bpf_in_ia32_syscall())
+	{
+		bpf_probe_read_user(&arg, sizeof(uint32_t), (void*)(args_pointer + (idx * sizeof(uint32_t))));
+	}
+	else
+	{
+		bpf_probe_read_user(&arg, sizeof(unsigned long), (void*)(args_pointer + (idx * sizeof(unsigned long))));
+	}
 	return arg;
 }
-#endif /* CAPTURE_SOCKETCALL */
 
 static __always_inline unsigned long bpf_syscall_get_argument(struct filler_data *data,
 							      int idx)
 {
 #ifdef BPF_SUPPORTS_RAW_TRACEPOINTS
-
-/* We define it here because we support socket calls only on kernels with BPF_SUPPORTS_RAW_TRACEPOINTS */
-#ifdef CAPTURE_SOCKETCALL
-	if(bpf_syscall_get_nr(data->ctx) == __NR_socketcall)
+	// We define it here because we support socket calls only on kernels with BPF_SUPPORTS_RAW_TRACEPOINTS
+	// `data->state->tail_ctx.socketcall_syscall_id != -1` just to improve perf
+	if(data->state->tail_ctx.socketcall_syscall_id != -1 && bpf_syscall_get_nr(data->ctx) == data->state->tail_ctx.socketcall_syscall_id)
 	{
 		return bpf_syscall_get_socketcall_arg(data->ctx, idx);
 	}
-#endif /* CAPTURE_SOCKETCALL */
 	return bpf_syscall_get_argument_from_ctx(data->ctx, idx);
 #else
 	return bpf_syscall_get_argument_from_args(data->args, idx);
@@ -324,6 +442,19 @@ static __always_inline bool is_syscall_interesting(int id)
 	}
 
 	return *enabled;
+}
+
+static __always_inline int convert_ia32_to_64(int id)
+{
+	int *x64_id = bpf_map_lookup_elem(&ia32_64_map, &id);
+
+	if (!x64_id)
+	{
+		bpf_printk("no 64bit mapped value for %d\n", id);
+		return -1;
+	}
+
+	return *x64_id;
 }
 
 static __always_inline const struct ppm_event_info *get_event_info(ppm_event_code event_type)
@@ -598,7 +729,8 @@ static __always_inline void reset_tail_ctx(struct scap_bpf_per_cpu_state *state,
 static __always_inline void call_filler(void *ctx,
 					void *stack_ctx,
 					ppm_event_code evt_type,
-					enum syscall_flags drop_flags)
+					enum syscall_flags drop_flags,
+					int socketcall_syscall_id)
 {
 	struct scap_bpf_settings *settings;
 	const struct ppm_event_entry *filler_info;
@@ -634,6 +766,8 @@ static __always_inline void call_filler(void *ctx,
 
 	++state->n_evts;
 
+	state->tail_ctx.socketcall_syscall_id = socketcall_syscall_id;
+
 	filler_info = get_event_filler_info(state->tail_ctx.evt_type);
 	if (!filler_info)
 		goto cleanup;
@@ -647,120 +781,11 @@ cleanup:
 	release_local_state(state);
 }
 
-#if defined(CAPTURE_SOCKETCALL) && defined(BPF_SUPPORTS_RAW_TRACEPOINTS)
-static __always_inline long convert_network_syscalls(void *ctx)
+#ifdef BPF_SUPPORTS_RAW_TRACEPOINTS
+static __always_inline long convert_network_syscalls(void *ctx, bool *is_syscall)
 {
 	int socketcall_id = (int)bpf_syscall_get_argument_from_ctx(ctx, 0);
-
-	switch(socketcall_id)
-	{
-#ifdef __NR_socket
-	case SYS_SOCKET:
-		return __NR_socket;
-#endif
-
-#ifdef __NR_socketpair
-	case SYS_SOCKETPAIR:
-		return __NR_socketpair;
-#endif
-
-	case SYS_ACCEPT:
-#if defined(CONFIG_S390) && defined(__NR_accept4)
-		return __NR_accept4;
-#elif defined(__NR_accept)
-		return __NR_accept;
-#endif
-		break;
-
-#ifdef __NR_accept4
-	case SYS_ACCEPT4:
-		return __NR_accept4;
-#endif
-
-#ifdef __NR_bind
-	case SYS_BIND:
-		return __NR_bind;
-#endif
-
-#ifdef __NR_listen
-	case SYS_LISTEN:
-		return __NR_listen;
-#endif
-
-#ifdef __NR_connect
-	case SYS_CONNECT:
-		return __NR_connect;
-#endif
-
-#ifdef __NR_getsockname
-	case SYS_GETSOCKNAME:
-		return __NR_getsockname;
-#endif
-
-#ifdef __NR_getpeername
-	case SYS_GETPEERNAME:
-		return __NR_getpeername;
-#endif
-
-#ifdef __NR_getsockopt
-	case SYS_GETSOCKOPT:
-		return __NR_getsockopt;
-#endif
-
-#ifdef __NR_setsockopt
-	case SYS_SETSOCKOPT:
-		return __NR_setsockopt;
-#endif
-
-#ifdef __NR_recv
-	case SYS_RECV:
-		return __NR_recv;
-#endif
-
-#ifdef __NR_recvfrom
-	case SYS_RECVFROM:
-		return __NR_recvfrom;
-#endif
-
-#ifdef __NR_recvmsg
-	case SYS_RECVMSG:
-		return __NR_recvmsg;
-#endif
-
-#ifdef __NR_recvmmsg
-	case SYS_RECVMMSG:
-		return __NR_recvmmsg;
-#endif
-
-#ifdef __NR_send
-	case SYS_SEND:
-		return __NR_send;
-#endif
-
-#ifdef __NR_sendto
-	case SYS_SENDTO:
-		return __NR_sendto;
-#endif
-
-#ifdef __NR_sendmsg
-	case SYS_SENDMSG:
-		return __NR_sendmsg;
-#endif
-
-#ifdef __NR_sendmmsg
-	case SYS_SENDMMSG:
-		return __NR_sendmmsg;
-#endif
-
-#ifdef __NR_shutdown
-	case SYS_SHUTDOWN:
-		return __NR_shutdown;
-#endif
-	default:
-		break;
-	}
-
-	return 0;
+	return socketcall_code_to_syscall_code(socketcall_id, is_syscall);
 }
 #endif
 

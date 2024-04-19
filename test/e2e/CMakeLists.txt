@@ -4,7 +4,7 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Linux")
 endif()
 
 if(NOT BUILD_BPF)
-	message(WARNING e2e tests can only be run with the eBPF probe)
+	message(WARNING "e2e tests can only be run with the eBPF probe")
 	return()
 endif()
 
@@ -16,6 +16,9 @@ if(DEFINED ENV{CI})
 else()
     set(E2E_REPORT ${CMAKE_CURRENT_BINARY_DIR})
 endif()
+
+add_compile_options(${FALCOSECURITY_LIBS_USERSPACE_COMPILE_FLAGS})
+add_link_options(${FALCOSECURITY_LIBS_USERSPACE_LINK_FLAGS})
 
 add_custom_target(e2e-install-deps
 	COMMAND pip3 install -r ${CMAKE_CURRENT_SOURCE_DIR}/tests/requirements.txt

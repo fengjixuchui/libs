@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,26 +16,26 @@ int BPF_PROG(send_e,
 	     struct pt_regs *regs,
 	     long id)
 {
-	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SEND_E_SIZE))
-	{
-		return 0;
-	}
-
-	ringbuf__store_event_header(&ringbuf, PPME_SOCKET_SEND_E);
-
-	/*=============================== COLLECT PARAMETERS  ===========================*/
-
 	/* Collect parameters at the beginning to manage socketcalls */
 	unsigned long args[3];
 	extract__network_args(args, 3, regs);
 
+	struct ringbuf_struct ringbuf;
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SEND_E_SIZE, PPME_SOCKET_SEND_E))
+	{
+		return 0;
+	}
+
+	ringbuf__store_event_header(&ringbuf);
+
+	/*=============================== COLLECT PARAMETERS  ===========================*/
+
 	/* Parameter 1: fd (type: PT_FD) */
-	s32 fd = (s32)args[0];
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)args[0];
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/* Parameter 2: size (type: PT_UINT32) */
-	u32 size = (u32)args[2];
+	uint32_t size = (uint32_t)args[2];
 	ringbuf__store_u32(&ringbuf, size);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
@@ -70,10 +71,10 @@ int BPF_PROG(send_x,
 	unsigned long args[3];
 	extract__network_args(args, 3, regs);
 
-	u16 bytes_to_read = ret > 0 ? ret : args[2];
-	u16 snaplen = maps__get_snaplen();
-	apply_dynamic_snaplen(regs, &snaplen, false);
-	if(snaplen > bytes_to_read)
+	int64_t bytes_to_read = ret > 0 ? ret : args[2];
+	uint16_t snaplen = maps__get_snaplen();
+	apply_dynamic_snaplen(regs, &snaplen, false, NULL);
+	if((int64_t)snaplen > bytes_to_read)
 	{
 		snaplen = bytes_to_read;
 	}

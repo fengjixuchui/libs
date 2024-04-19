@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -28,8 +29,8 @@ int BPF_PROG(sendmsg_e,
 	extract__network_args(args, 2, regs);
 
 	/* Parameter 1: fd (type: PT_FD) */
-	s32 socket_fd = (s32)args[0];
-	auxmap__store_s64_param(auxmap, (s64)socket_fd);
+	int32_t socket_fd = (int32_t)args[0];
+	auxmap__store_s64_param(auxmap, (int64_t)socket_fd);
 
 	/* Parameter 2: size (type: PT_UINT32) */
 	unsigned long msghdr_pointer = args[1];
@@ -44,7 +45,10 @@ int BPF_PROG(sendmsg_e,
 	 */
 	if(socket_fd >= 0)
 	{
-		auxmap__store_socktuple_param(auxmap, socket_fd, OUTBOUND);
+		struct sockaddr *usrsockaddr;
+		struct msghdr *msg = (struct msghdr*)msghdr_pointer;
+		BPF_CORE_READ_USER_INTO(&usrsockaddr, msg, msg_name);
+		auxmap__store_socktuple_param(auxmap, socket_fd, OUTBOUND, usrsockaddr);
 	}
 	else
 	{
@@ -91,8 +95,10 @@ int BPF_PROG(sendmsg_x,
 	 * otherwise we need to extract it now and it has a cost. Here we check just
 	 * the return value if the syscall is successful.
 	 */
-	u16 snaplen = maps__get_snaplen();
-	apply_dynamic_snaplen(regs, &snaplen, true);
+	uint16_t snaplen = maps__get_snaplen();
+	struct sockaddr *sockaddr;
+	BPF_CORE_READ_USER_INTO(&sockaddr, (struct msghdr*)args[1], msg_name);
+	apply_dynamic_snaplen(regs, &snaplen, true, sockaddr);
 	if(ret > 0 && snaplen > ret)
 	{
 		snaplen = ret;

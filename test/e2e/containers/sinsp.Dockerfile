@@ -9,9 +9,7 @@ RUN apt-get update && \
     jq \
     libjsoncpp1 \
     openssl \
-    libb64-0d \
     libre2-5 \
-    liblua5.1-0 \
     libtbb2
 
 COPY /sinsp-example /usr/local/bin/sinsp-example

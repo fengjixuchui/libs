@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -9,7 +10,7 @@
 
 static __always_inline bool check_fcntl_dropping(struct pt_regs *regs)
 {
-	int cmd = (s32)extract__syscall_argument(regs, 1);
+	int cmd = (int32_t)extract__syscall_argument(regs, 1);
 	if(cmd != F_DUPFD && cmd != F_DUPFD_CLOEXEC)
 	{
 		return true;
@@ -30,21 +31,21 @@ int BPF_PROG(fcntl_e,
 	}
 
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, FCNTL_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, FCNTL_E_SIZE, PPME_SYSCALL_FCNTL_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_FCNTL_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: fd (type: PT_FD) */
-	s32 fd = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/* Parameter 2: cmd (type: PT_ENUMFLAGS8) */
-	int cmd = (s32)extract__syscall_argument(regs, 1);
+	int cmd = (int32_t)extract__syscall_argument(regs, 1);
 	ringbuf__store_u8(&ringbuf, fcntl_cmd_to_scap(cmd));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
@@ -69,17 +70,25 @@ int BPF_PROG(fcntl_x,
 	}
 
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, FCNTL_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, FCNTL_X_SIZE, PPME_SYSCALL_FCNTL_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_FCNTL_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: res (type: PT_FD)*/
 	ringbuf__store_s64(&ringbuf, ret);
+
+	/* Parameter 2: fd (type: PT_FD) */
+	int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
+
+	/* Parameter 3: cmd (type: PT_ENUMFLAGS8) */
+	int cmd = (int32_t)extract__syscall_argument(regs, 1);
+	ringbuf__store_u8(&ringbuf, fcntl_cmd_to_scap(cmd));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +18,7 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
-#include "sinsp_with_test_input.h"
+#include <sinsp_with_test_input.h>
 #include "test_utils.h"
 
 /*
@@ -31,7 +32,6 @@ TEST_F(sinsp_with_test_input, charbuf_empty_param)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
 	int64_t test_errno = 0;
 
 	/* `PPME_SYSCALL_CHDIR_X` is a simple event that uses a `PT_CHARBUF`.
@@ -43,9 +43,7 @@ TEST_F(sinsp_with_test_input, charbuf_empty_param)
 
 	// this, and the following similar checks, verify that the internal state is set as we need right now.
 	// if the internal state changes we can remove or update this check
-	param = evt->get_param(1);
-	ASSERT_EQ(param->m_len, 5);
-	ASSERT_STREQ(param->m_val, "<NA>");
+	ASSERT_STREQ(evt->get_param(1)->as<std::string_view>().data(), "<NA>");
 
 	/* `PPME_SYSCALL_CREAT_E` is a simple event that uses a `PT_FSPATH`
 	 * A `NULL` `PT_FSPATH` param is always converted to `<NA>`.
@@ -53,9 +51,7 @@ TEST_F(sinsp_with_test_input, charbuf_empty_param)
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_CREAT_E, 2, NULL, 0);
 	ASSERT_EQ(get_field_as_string(evt, "evt.arg.name"), "<NA>");
 
-	param = evt->get_param(0);
-	ASSERT_EQ(param->m_len, 5);
-	ASSERT_STREQ(param->m_val, "<NA>");
+	ASSERT_STREQ(evt->get_param(0)->as<std::string_view>().data(), "<NA>");
 
 	int64_t dirfd = 0;
 
@@ -65,9 +61,7 @@ TEST_F(sinsp_with_test_input, charbuf_empty_param)
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_EXECVEAT_E, 3, dirfd, NULL, 0);
 	ASSERT_EQ(get_field_as_string(evt, "evt.arg.pathname"), "<NA>");
 
-	param = evt->get_param(1);
-	ASSERT_EQ(param->m_len, 5);
-	ASSERT_STREQ(param->m_val, "<NA>");
+	ASSERT_STREQ(evt->get_param(1)->as<std::string_view>().data(), "<NA>");
 }
 
 /* Assert that a `PT_CHARBUF` with `len==1` (just the `\0`) is not changed. */
@@ -77,7 +71,6 @@ TEST_F(sinsp_with_test_input, param_charbuf_len_1)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
 
 	int64_t test_errno = 0;
 
@@ -88,9 +81,7 @@ TEST_F(sinsp_with_test_input, param_charbuf_len_1)
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_CHDIR_X, 2, test_errno, "");
 	ASSERT_EQ(get_field_as_string(evt, "evt.arg.path"), "");
 
-	param = evt->get_param(1);
-	ASSERT_EQ(param->m_len, 1);
-	ASSERT_STREQ(param->m_val, "");
+	ASSERT_STREQ(evt->get_param(1)->as<std::string_view>().data(), "");
 }
 
 /* Assert that a "(NULL)" `PT_CHARBUF` param is converted to `<NA>`
@@ -103,7 +94,6 @@ TEST_F(sinsp_with_test_input, charbuf_NULL_param)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
 
 	int64_t test_errno = 0;
 
@@ -111,9 +101,7 @@ TEST_F(sinsp_with_test_input, charbuf_NULL_param)
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_CHDIR_X, 2, test_errno, "(NULL)");
 	ASSERT_EQ(get_field_as_string(evt, "evt.arg.path"), "<NA>");
 
-	param = evt->get_param(1);
-	ASSERT_EQ(param->m_len, 5);
-	ASSERT_STREQ(param->m_val, "<NA>");
+	ASSERT_STREQ(evt->get_param(1)->as<std::string_view>().data(), "<NA>");
 }
 
 /* Assert that an empty `PT_BYTEBUF` param is NOT converted to `<NA>` */
@@ -123,12 +111,12 @@ TEST_F(sinsp_with_test_input, bytebuf_empty_param)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
+	const sinsp_evt_param* param = NULL;
 
 	int64_t test_errno = 0;
 
 	/* `PPME_SYSCALL_PWRITE_X` is a simple event that uses a `PT_BYTEBUF` */
-	struct scap_const_sized_buffer bytebuf_param;
+	scap_const_sized_buffer bytebuf_param;
 	bytebuf_param.buf = NULL;
 	bytebuf_param.size = 0;
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_PWRITE_X, 2, test_errno, bytebuf_param);
@@ -145,12 +133,12 @@ TEST_F(sinsp_with_test_input, sockaddr_empty_param)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
+	const sinsp_evt_param* param = NULL;
 
 	int64_t fd = 0;
 
 	/* `PPME_SOCKET_CONNECT_E` is a simple event that uses a `PT_SOCKADDR` */
-	struct scap_const_sized_buffer sockaddr_param;
+	scap_const_sized_buffer sockaddr_param;
 	sockaddr_param.buf = NULL;
 	sockaddr_param.size = 0;
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SOCKET_CONNECT_E, 2, fd, sockaddr_param);
@@ -158,15 +146,15 @@ TEST_F(sinsp_with_test_input, sockaddr_empty_param)
 	ASSERT_EQ(param->m_len, 0);
 
 	/* `PPME_SOCKET_CONNECT_X` is a simple event that uses a `PT_SOCKTUPLE` */
-	struct scap_const_sized_buffer socktuple_param;
+	scap_const_sized_buffer socktuple_param;
 	socktuple_param.buf = NULL;
 	socktuple_param.size = 0;
-	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SOCKET_CONNECT_X, 2, fd, socktuple_param);
+	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SOCKET_CONNECT_X, 3, fd, socktuple_param, fd);
 	param = evt->get_param(1);
 	ASSERT_EQ(param->m_len, 0);
 
 	/* `PPME_SYSCALL_POLL_X` is a simple event that uses a `PT_FDLIST` */
-	struct scap_const_sized_buffer fdlist_param;
+	scap_const_sized_buffer fdlist_param;
 	fdlist_param.buf = NULL;
 	fdlist_param.size = 0;
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_POLL_X, 2, fd, fdlist_param);
@@ -208,8 +196,8 @@ TEST_F(sinsp_with_test_input, enter_event_retrieval)
 	open_inspector();
 	sinsp_evt* evt = NULL;
 	const char* expected_string = "/tmp/the_file";
-	int dirfd = 3;
-	int new_fd = 100;
+	uint64_t dirfd = 3;
+	uint64_t new_fd = 100;
 
 	std::vector<const char*> invalid_inputs = {"<NA>", "(NULL)", NULL};
 
@@ -273,7 +261,7 @@ TEST_F(sinsp_with_test_input, enter_event_retrieval)
 	{
 		std::string test_context = std::string("creat with filename ") + test_utils::describe_string(enter_filename);
 
-		add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_CREAT_E, 3, NULL, 0);
+		add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_CREAT_E, 2, NULL, 0);
 		evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_CREAT_X, 5, new_fd, expected_string, 0, 0, (uint64_t) 0);
 
 		ASSERT_NE(evt->get_thread_info(), nullptr) << test_context;
@@ -298,37 +286,10 @@ TEST_F(sinsp_with_test_input, execve_invalid_path_entry)
 
 	add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_EXECVE_19_E, 1, "<NA>");
 
-	struct scap_const_sized_buffer empty_bytebuf = {nullptr, 0};
+	scap_const_sized_buffer empty_bytebuf = {nullptr, 0};
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_EXECVE_19_X, 23, (int64_t) 0, "/bin/test-exe", empty_bytebuf, (uint64_t) 1, (uint64_t) 1, (uint64_t) 1, "<NA>", (uint64_t) 0, (uint64_t) 0, (uint64_t) 0, 0, 0, 0, "test-exe", empty_bytebuf, empty_bytebuf, 0, (uint64_t) 0, 0, 0, (uint64_t) 0, (uint64_t) 0, (uint64_t) 0);
 
 	ASSERT_EQ(get_field_as_string(evt, "proc.name"), "test-exe");
-}
-
-
-TEST_F(sinsp_with_test_input, event_category)
-{
-	add_default_init_thread();
-
-	open_inspector();
-	sinsp_evt* evt = NULL;
-
-	int64_t fd = 4, mountfd = 5, test_errno = 0;
-
-	/* Check that `EC_SYSCALL` category is not considered */
-	add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_OPEN_BY_HANDLE_AT_E, 0);
-	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_OPEN_BY_HANDLE_AT_X, 4, fd, mountfd, PPM_O_RDWR, "/tmp/the_file.txt");
-	ASSERT_EQ(evt->get_category(), EC_FILE);
-	ASSERT_EQ(get_field_as_string(evt, "evt.category"), "file");
-
-	/* Check that `EC_TRACEPOINT` category is not considered */
-	evt = add_event_advance_ts(increasing_ts(), 1, PPME_PROCEXIT_1_E, 4, test_errno, test_errno, 0, 0);
-	ASSERT_EQ(evt->get_category(), EC_PROCESS);
-	ASSERT_EQ(get_field_as_string(evt, "evt.category"), "process");
-
-	/* Check that `EC_METAEVENT` category is not considered */
-	evt = add_event_advance_ts(increasing_ts(), 1, PPME_NOTIFICATION_E, 2, NULL, "data");
-	ASSERT_EQ(evt->get_category(), EC_OTHER);
-	ASSERT_EQ(get_field_as_string(evt, "evt.category"), "other");
 }
 
 /* Check that enum flags are correctly handled,
@@ -340,13 +301,11 @@ TEST_F(sinsp_with_test_input, enumparams)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
 
 	/* `PPME_SOCKET_SOCKET_E` is a simple event that uses a PT_ENUMFLAGS32 (param 1) */
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SOCKET_SOCKET_E, 3, PPM_AF_UNIX, 0, 0);
 
-	param = evt->get_param(0);
-	ASSERT_EQ(*(uint32_t *)param->m_val, PPM_AF_UNIX);
+	ASSERT_EQ(evt->get_param(0)->as<uint32_t>(), PPM_AF_UNIX);
 
 	const char *val_str = NULL;
 	evt->get_param_as_str(0, &val_str);
@@ -361,14 +320,12 @@ TEST_F(sinsp_with_test_input, enumparams_fcntl_dupfd)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
 
 	/* `PPME_SYSCALL_FCNTL_E` is a simple event that uses a PT_ENUMFLAGS32 (param 2) */
 	uint8_t flag = PPM_FCNTL_F_DUPFD;
-	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_FCNTL_E, 2, 0, flag);
+	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_FCNTL_E, 2, (int64_t) 0, flag);
 
-	param = evt->get_param(1);
-	ASSERT_EQ(*(uint8_t *)param->m_val, PPM_FCNTL_F_DUPFD);
+	ASSERT_EQ(evt->get_param(1)->as<uint8_t>(), PPM_FCNTL_F_DUPFD);
 
 	const char *val_str = NULL;
 	evt->get_param_as_str(1, &val_str);
@@ -383,14 +340,12 @@ TEST_F(sinsp_with_test_input, bitmaskparams)
 
 	open_inspector();
 	sinsp_evt* evt = NULL;
-	sinsp_evt_param* param = NULL;
 
 	int64_t dirfd = 0;
 	/* `PPME_SYSCALL_OPENAT_E` is a simple event that uses a PT_FLAGS32 (param 3) */
 	evt = add_event_advance_ts(increasing_ts(), 1, PPME_SYSCALL_OPENAT_E, 4, dirfd, "/tmp/foo", PPM_O_RDONLY|PPM_O_CLOEXEC, 0);
 
-	param = evt->get_param(2);
-	ASSERT_EQ(*(uint32_t *)param->m_val, PPM_O_RDONLY|PPM_O_CLOEXEC);
+	ASSERT_EQ(evt->get_param(2)->as<uint32_t>(), PPM_O_RDONLY|PPM_O_CLOEXEC);
 
 	const char *val_str = NULL;
 	evt->get_param_as_str(2, &val_str);

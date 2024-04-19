@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -12,26 +13,7 @@
 #include <helpers/base/read_from_task.h>
 #include <helpers/extract/extract_from_kernel.h>
 
-static __always_inline bool syscalls_dispatcher__check_32bit_syscalls()
-{
-	uint32_t status;
-	struct task_struct *task = get_current_task();
-
-#if defined(__TARGET_ARCH_x86)
-	READ_TASK_FIELD_INTO(&status, task, thread_info.status);
-	return status & TS_COMPAT;
-#elif defined(__TARGET_ARCH_arm64)
-	READ_TASK_FIELD_INTO(&status, task, thread_info.flags);
-	return status & _TIF_32BIT;
-#elif defined(__TARGET_ARCH_s390)
-	READ_TASK_FIELD_INTO(&status, task, thread_info.flags);
-	return status & _TIF_31BIT;
-#else
-	return false;
-#endif
-}
-
-static __always_inline bool syscalls_dispatcher__64bit_interesting_syscall(u32 syscall_id)
+static __always_inline bool syscalls_dispatcher__64bit_interesting_syscall(uint32_t syscall_id)
 {
 	return maps__64bit_interesting_syscall(syscall_id);
 }
@@ -148,5 +130,34 @@ static __always_inline long convert_network_syscalls(struct pt_regs *regs)
 		break;
 	}
 
-	return 0;
+	/* There are cases in which the socket call code is defined
+	 * but the corresponding syscall code is not.
+	 * For example on s390x machines `SYS_ACCEPT` is defined but
+	 * `__NR_accept` is not. The difference with other drivers is
+	 * that in the modern probe we cannot return the associated event
+	 * instead of the syscall code, so we need to find other workarounds.
+	 *
+	 * Known cases in which the socket call code is defined but
+	 * the corresponding syscall code is not:
+	 *
+	 * ----- s390x
+	 * - `SYS_ACCEPT` is defined but `__NR_accept` is not defined
+	 * -> In this case we return a `__NR_accept4`
+	 *
+	 * ----- x86 with CONFIG_IA32_EMULATION
+	 * - `SYS_ACCEPT` is defined but `__NR_accept` is not defined
+	 * -> In this case we return a `__NR_accept4`
+	 * 
+	 * - `SYS_SEND` is defined but `__NR_send` is not defined
+	 * -> In this case we drop the event
+	 * 
+	 * - `SYS_RECV` is defined but `__NR_recv` is not defined
+	 * -> In this case we drop the event
+	 */
+
+	/* If we are not able to convert to a syscall we drop the event.
+	 * This should happen in the cases listed above or when we receive
+	 * a wrong SOCKETCALL code.
+	 */
+	return -1;
 }

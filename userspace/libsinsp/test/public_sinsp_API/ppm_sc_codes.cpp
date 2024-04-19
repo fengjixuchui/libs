@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
 Copyright (C) 2023 The Falco Authors.
 
@@ -16,7 +17,7 @@ limitations under the License.
 */
 
 #include <gtest/gtest.h>
-#include <sinsp.h>
+#include <libsinsp/sinsp.h>
 #include "../test_utils.h"
 
 // This is loaded in the first test
@@ -172,14 +173,14 @@ const libsinsp::events::set<ppm_event_code> expected_sinsp_state_event_set = {
 	PPME_DROP_E,
 	PPME_DROP_X,
 	PPME_SCAPEVENT_E,
-	PPME_CONTAINER_E, // <<<- test are failing because we are not covering old meta events versions. do we want meta events in this set, we have no a PPM_SC associated (?)
+	PPME_CONTAINER_E,
 	PPME_PROCINFO_E,
 	PPME_CPU_HOTPLUG_E,
 	PPME_K8S_E,
 	PPME_TRACER_E,
 	PPME_TRACER_X,
 	PPME_MESOS_E,
-	PPME_CONTAINER_JSON_E, // <<<- test are failing because we are not covering old meta events versions
+	PPME_CONTAINER_JSON_E,
 	PPME_NOTIFICATION_E,
 	PPME_INFRASTRUCTURE_EVENT_E,
 	PPME_CONTAINER_JSON_2_E,
@@ -204,6 +205,13 @@ const libsinsp::events::set<ppm_event_code> expected_sinsp_state_event_set = {
 	PPME_SYSCALL_SIGNALFD4_X,
 	PPME_SYSCALL_PRCTL_E,
 	PPME_SYSCALL_PRCTL_X,
+	PPME_ASYNCEVENT_E,
+	PPME_SYSCALL_MEMFD_CREATE_E,
+	PPME_SYSCALL_MEMFD_CREATE_X,
+	PPME_SYSCALL_PIDFD_GETFD_E,
+	PPME_SYSCALL_PIDFD_GETFD_X,
+	PPME_SYSCALL_PIDFD_OPEN_E,
+	PPME_SYSCALL_PIDFD_OPEN_X
 };
 
 const libsinsp::events::set<ppm_sc_code> expected_sinsp_state_sc_set = {
@@ -270,6 +278,9 @@ const libsinsp::events::set<ppm_sc_code> expected_sinsp_state_sc_set = {
 	PPM_SC_EPOLL_CREATE1,
 	PPM_SC_SCHED_PROCESS_EXIT,
 	PPM_SC_PRCTL,
+	PPM_SC_MEMFD_CREATE,
+	PPM_SC_PIDFD_OPEN,
+	PPM_SC_PIDFD_GETFD,
 };
 
 const libsinsp::events::set<ppm_event_code> expected_unknown_event_set = {
@@ -293,6 +304,7 @@ const libsinsp::events::set<ppm_event_code> expected_unknown_event_set = {
 	PPME_PROCINFO_X,
 	PPME_SIGNALDELIVER_X,
 	PPME_CONTAINER_X,
+	PPME_ASYNCEVENT_X,
 };
 
 /// todo(@Andreagit97): here we miss static sets for io, proc, net groups

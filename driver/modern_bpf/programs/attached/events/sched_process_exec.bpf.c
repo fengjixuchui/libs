@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -59,7 +60,7 @@ int BPF_PROG(sched_p_exec,
 	/* We need to extract the len of `exe` arg so we can understand
 	 * the overall length of the remaining args.
 	 */
-	u16 exe_arg_len = auxmap__store_charbuf_param(auxmap, arg_start_pointer, MAX_PROC_EXE, USER);
+	uint16_t exe_arg_len = auxmap__store_charbuf_param(auxmap, arg_start_pointer, MAX_PROC_EXE, USER);
 
 	/* Parameter 3: args (type: PT_CHARBUFARRAY) */
 	/* Here we read the whole array starting from the pointer to the first
@@ -71,17 +72,17 @@ int BPF_PROG(sched_p_exec,
 
 	/* Parameter 4: tid (type: PT_PID) */
 	/* this is called `tid` but it is the `pid`. */
-	s64 pid = (s64)extract__task_xid_nr(task, PIDTYPE_PID);
+	int64_t pid = (int64_t)extract__task_xid_nr(task, PIDTYPE_PID);
 	auxmap__store_s64_param(auxmap, pid);
 
 	/* Parameter 5: pid (type: PT_PID) */
 	/* this is called `pid` but it is the `tgid`. */
-	s64 tgid = (s64)extract__task_xid_nr(task, PIDTYPE_TGID);
+	int64_t tgid = (int64_t)extract__task_xid_nr(task, PIDTYPE_TGID);
 	auxmap__store_s64_param(auxmap, tgid);
 
 	/* Parameter 6: ptid (type: PT_PID) */
 	/* this is called `ptid` but it is the `pgid`. */
-	s64 pgid = (s64)extract__task_xid_nr(task, PIDTYPE_PGID);
+	int64_t pgid = (int64_t)extract__task_xid_nr(task, PIDTYPE_PGID);
 	auxmap__store_s64_param(auxmap, pgid);
 
 	/* Parameter 7: cwd (type: PT_CHARBUF) */
@@ -107,15 +108,15 @@ int BPF_PROG(sched_p_exec,
 	READ_TASK_FIELD_INTO(&mm, task, mm);
 
 	/* Parameter 11: vm_size (type: PT_UINT32) */
-	u32 vm_size = extract__vm_size(mm);
+	uint32_t vm_size = extract__vm_size(mm);
 	auxmap__store_u32_param(auxmap, vm_size);
 
 	/* Parameter 12: vm_rss (type: PT_UINT32) */
-	u32 vm_rss = extract__vm_rss(mm);
+	uint32_t vm_rss = extract__vm_rss(mm);
 	auxmap__store_u32_param(auxmap, vm_rss);
 
 	/* Parameter 13: vm_swap (type: PT_UINT32) */
-	u32 vm_swap = extract__vm_swap(mm);
+	uint32_t vm_swap = extract__vm_swap(mm);
 	auxmap__store_u32_param(auxmap, vm_swap);
 
 	/* Parameter 14: comm (type: PT_CHARBUF) */
@@ -161,62 +162,115 @@ int BPF_PROG(t1_sched_p_exec,
 	 */
 	auxmap__store_bytebuf_param(auxmap, env_start_pointer, total_env_len & (MAX_PROC_ARG_ENV - 1), USER);
 
-	/* Parameter 17: tty (type: PT_INT32) */
-	u32 tty = exctract__tty(task);
-	auxmap__store_s32_param(auxmap, (s32)tty);
+	/* Parameter 17: tty (type: PT_UINT32) */
+	uint32_t tty = exctract__tty(task);
+	auxmap__store_u32_param(auxmap, (uint32_t)tty);
 
 	/* Parameter 18: pgid (type: PT_PID) */
 	pid_t pgid = extract__task_xid_vnr(task, PIDTYPE_PGID);
-	auxmap__store_s64_param(auxmap, (s64)pgid);
+	auxmap__store_s64_param(auxmap, (int64_t)pgid);
 
-	/* Parameter 19: loginuid (type: PT_INT32) */
-	u32 loginuid;
+	/* Parameter 19: loginuid (type: PT_UID) */
+	uint32_t loginuid;
 	extract__loginuid(task, &loginuid);
-	auxmap__store_s32_param(auxmap, (s32)loginuid);
+	auxmap__store_u32_param(auxmap, (uint32_t)loginuid);
 
 	/* Parameter 20: flags (type: PT_FLAGS32) */
-	u32 flags = 0;
+	uint32_t flags = 0;
 	struct inode *exe_inode = extract__exe_inode_from_task(task);
+	struct file *exe_file = extract__exe_file_from_task(task);
+
 	if(extract__exe_writable(task, exe_inode))
 	{
 		flags |= PPM_EXE_WRITABLE;
 	}
-	if(extract__exe_upper_layer(exe_inode))
+	if(extract__exe_upper_layer(exe_inode, exe_file))
 	{
 		flags |= PPM_EXE_UPPER_LAYER;
 	}
+	if(extract__exe_from_memfd(exe_file))
+	{
+		flags |= PPM_EXE_FROM_MEMFD;
+	}
+
 	auxmap__store_u32_param(auxmap, flags);
 
 	/* Parameter 21: cap_inheritable (type: PT_UINT64) */
-	u64 cap_inheritable = extract__capability(task, CAP_INHERITABLE);
+	uint64_t cap_inheritable = extract__capability(task, CAP_INHERITABLE);
 	auxmap__store_u64_param(auxmap, cap_inheritable);
 
 	/* Parameter 22: cap_permitted (type: PT_UINT64) */
-	u64 cap_permitted = extract__capability(task, CAP_PERMITTED);
+	uint64_t cap_permitted = extract__capability(task, CAP_PERMITTED);
 	auxmap__store_u64_param(auxmap, cap_permitted);
 
 	/* Parameter 23: cap_effective (type: PT_UINT64) */
-	u64 cap_effective = extract__capability(task, CAP_EFFECTIVE);
+	uint64_t cap_effective = extract__capability(task, CAP_EFFECTIVE);
 	auxmap__store_u64_param(auxmap, cap_effective);
 
 	/* Parameter 24: exe_file ino (type: PT_UINT64) */
-	u64 ino = 0;
+	uint64_t ino = 0;
 	extract__ino_from_inode(exe_inode, &ino);
 	auxmap__store_u64_param(auxmap, ino);
 
 	/* Parameter 25: exe_file ctime (last status change time, epoch value in nanoseconds) (type: PT_ABSTIME) */
 	struct timespec64 time = { 0, 0 };
-	BPF_CORE_READ_INTO(&time, exe_inode, i_ctime);
+	if(bpf_core_field_exists(exe_inode->i_ctime))
+	{
+		BPF_CORE_READ_INTO(&time, exe_inode, i_ctime);
+	}
+	else
+	{
+		struct inode___v6_6 *exe_inode_v6_6 = (void *)exe_inode;
+		BPF_CORE_READ_INTO(&time, exe_inode_v6_6, __i_ctime);
+	}
 	auxmap__store_u64_param(auxmap, extract__epoch_ns_from_time(time));
 
 	/* Parameter 26: exe_file mtime (last modification time, epoch value in nanoseconds) (type: PT_ABSTIME) */
-	BPF_CORE_READ_INTO(&time, exe_inode, i_mtime);
+	if(bpf_core_field_exists(exe_inode->i_mtime))
+	{
+		BPF_CORE_READ_INTO(&time, exe_inode, i_mtime);
+	}
+	else
+	{
+		struct inode___v6_7 *exe_inode_v6_7 = (void *)exe_inode;
+		BPF_CORE_READ_INTO(&time, exe_inode_v6_7, __i_mtime);
+	}
 	auxmap__store_u64_param(auxmap, extract__epoch_ns_from_time(time));
 
-	/* Parameter 27: uid (type: PT_UINT32) */
-	u32 uid = 0;
-	extract__euid(task, &uid);
-	auxmap__store_u32_param(auxmap, uid);
+	/* Parameter 27: euid (type: PT_UID) */
+	uint32_t euid;
+	extract__euid(task, &euid);
+	auxmap__store_u32_param(auxmap, euid);
+
+	/*=============================== COLLECT PARAMETERS  ===========================*/
+
+	bpf_tail_call(ctx, &extra_event_prog_tail_table, T2_SCHED_PROC_EXEC);
+	return 0;
+}
+
+SEC("tp_btf/sys_exit")
+int BPF_PROG(t2_sched_p_exec, struct pt_regs *regs, long ret)
+{
+	struct auxiliary_map *auxmap = auxmap__get();
+	if(!auxmap)
+	{
+		return 0;
+	}
+
+	/*=============================== COLLECT PARAMETERS  ===========================*/
+
+	struct task_struct *task = get_current_task();
+	struct file *exe_file = extract__exe_file_from_task(task);
+
+	/* Parameter 28: trusted_exepath (type: PT_FSPATH) */
+	if(exe_file != NULL)
+	{
+		auxmap__store_d_path_approx(auxmap, &(exe_file->f_path));
+	}
+	else
+	{
+		auxmap__store_empty_param(auxmap);
+	}
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -225,4 +279,5 @@ int BPF_PROG(t1_sched_p_exec,
 	auxmap__submit_event(auxmap, ctx);
 	return 0;
 }
+
 #endif /* CAPTURE_SCHED_PROC_EXEC */

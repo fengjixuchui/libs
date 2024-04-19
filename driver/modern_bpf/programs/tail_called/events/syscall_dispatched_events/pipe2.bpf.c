@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,12 +16,12 @@ int BPF_PROG(pipe2_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, PIPE2_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, PIPE2_E_SIZE, PPME_SYSCALL_PIPE2_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_PIPE2_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -43,19 +44,19 @@ int BPF_PROG(pipe2_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, PIPE2_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, PIPE2_X_SIZE, PPME_SYSCALL_PIPE2_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_PIPE2_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: res (type: PT_ERRNO) */
 	ringbuf__store_s64(&ringbuf, ret);
 
-	s32 pipefd[2] = {-1, -1};
+	int32_t pipefd[2] = {-1, -1};
 	/* This is a pointer to the vector with the 2 file descriptors. */
 	unsigned long fd_vector_pointer = extract__syscall_argument(regs, 0);
 	if(bpf_probe_read_user((void *)pipefd, sizeof(pipefd), (void *)fd_vector_pointer) != 0)
@@ -65,12 +66,12 @@ int BPF_PROG(pipe2_x,
 	}
 
 	/* Parameter 2: fd1 (type: PT_FD) */
-	ringbuf__store_s64(&ringbuf, (s64)pipefd[0]);
+	ringbuf__store_s64(&ringbuf, (int64_t)pipefd[0]);
 
 	/* Parameter 3: fd2 (type: PT_FD) */
-	ringbuf__store_s64(&ringbuf, (s64)pipefd[1]);
+	ringbuf__store_s64(&ringbuf, (int64_t)pipefd[1]);
 
-	u64 ino = 0;
+	uint64_t ino = 0;
 	/* On success, pipe returns `0` */
 	if(ret == 0)
 	{
@@ -81,7 +82,7 @@ int BPF_PROG(pipe2_x,
 	ringbuf__store_u64(&ringbuf, ino);
 
 	/* Parameter 5: flags (type: PT_FLAGS32) */
-	s32 flags = extract__syscall_argument(regs, 1);
+	int32_t flags = extract__syscall_argument(regs, 1);
 	ringbuf__store_u32(&ringbuf, pipe2_flags_to_scap(flags));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

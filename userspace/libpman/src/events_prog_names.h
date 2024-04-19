@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +18,8 @@ limitations under the License.
 
 #pragma once
 
-#include <ppm_events_public.h>
-#include <feature_gates.h>
+#include <driver/ppm_events_public.h>
+#include <driver/feature_gates.h>
 
 /* For every event here we have the name of the corresponding bpf program. */
 static const char* event_prog_names[PPM_EVENT_MAX] = {
@@ -312,6 +313,28 @@ static const char* event_prog_names[PPM_EVENT_MAX] = {
 	[PPME_SYSCALL_SIGNALFD4_X] = "signalfd4_x",
 	[PPME_SYSCALL_PRCTL_E] = "prctl_e",
 	[PPME_SYSCALL_PRCTL_X] = "prctl_x",
+	[PPME_SYSCALL_MEMFD_CREATE_E] = "memfd_create_e",
+	[PPME_SYSCALL_MEMFD_CREATE_X] =  "memfd_create_x",
+	[PPME_SYSCALL_PIDFD_GETFD_E] = "pidfd_getfd_e",
+	[PPME_SYSCALL_PIDFD_GETFD_X] = "pidfd_getfd_x",
+	[PPME_SYSCALL_PIDFD_OPEN_E] = "pidfd_open_e",
+	[PPME_SYSCALL_PIDFD_OPEN_X] = "pidfd_open_x",
+	[PPME_SYSCALL_INIT_MODULE_E] = "init_module_e",
+	[PPME_SYSCALL_INIT_MODULE_X] = "init_module_x",
+	[PPME_SYSCALL_FINIT_MODULE_E] = "finit_module_e",
+	[PPME_SYSCALL_FINIT_MODULE_X] = "finit_module_x",
+	[PPME_SYSCALL_MKNOD_E] = "mknod_e",
+	[PPME_SYSCALL_MKNOD_X] = "mknod_x",
+	[PPME_SYSCALL_MKNODAT_E] = "mknodat_e",
+	[PPME_SYSCALL_MKNODAT_X] = "mknodat_x",
+	[PPME_SYSCALL_NEWFSTATAT_E] = "newfstatat_e",
+	[PPME_SYSCALL_NEWFSTATAT_X] = "newfstatat_x",
+	[PPME_SYSCALL_PROCESS_VM_READV_E] = "process_vm_readv_e",
+	[PPME_SYSCALL_PROCESS_VM_READV_X] = "process_vm_readv_x",
+	[PPME_SYSCALL_PROCESS_VM_WRITEV_E] = "process_vm_writev_e",
+	[PPME_SYSCALL_PROCESS_VM_WRITEV_X] = "process_vm_writev_x",
+	[PPME_SYSCALL_DELETE_MODULE_E] = "delete_module_e",
+	[PPME_SYSCALL_DELETE_MODULE_X] = "delete_module_x",
 };
 
 /* Some events can require more than one bpf program to collect all the data. */
@@ -324,6 +347,7 @@ static const char* extra_event_prog_names[TAIL_EXTRA_EVENT_PROG_MAX] = {
 	[T1_VFORK_X] = "t1_vfork_x",
 #ifdef CAPTURE_SCHED_PROC_EXEC
 	[T1_SCHED_PROC_EXEC] = "t1_sched_p_exec",
+	[T2_SCHED_PROC_EXEC] = "t2_sched_p_exec",
 #endif
 #ifdef CAPTURE_SCHED_PROC_FORK
 	[T1_SCHED_PROC_FORK] = "t1_sched_p_fork",
@@ -336,4 +360,7 @@ static const char* extra_event_prog_names[TAIL_EXTRA_EVENT_PROG_MAX] = {
 	[T1_DROP_E] = "t1_drop_e",
 	[T1_DROP_X] = "t1_drop_x",
 	[T1_HOTPLUG_E] = "t1_hotplug_e",
+	[T1_OPEN_BY_HANDLE_AT_X] = "t1_open_by_handle_at_x",
+	[T2_EXECVE_X] = "t2_execve_x",
+	[T2_EXECVEAT_X] = "t2_execveat_x",
 };

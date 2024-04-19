@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,17 +18,13 @@ limitations under the License.
 
 #pragma once
 
-#include "plugin_api.h"
+#include <plugin/plugin_api.h>
+
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
-/*!
-    \brief The maximum length of the error strings written by the plugin loader
-*/
-#define PLUGIN_MAX_ERRLEN 2048
 
 /*!
     \brief This enums the capabilities supported by plugins.
@@ -36,12 +33,18 @@ extern "C" {
     Currently, the supported capabilities are:
         * ability to source events and provide them to the event loop
         * ability to extract fields from events created by other plugins
+        * ability to parse events from the event loop (at most once) before
+          the field extraction phase
+        * ability to inject events asynchronously in the event loop
 */
 typedef enum
 {
     CAP_NONE        = 0,
     CAP_SOURCING    = 1 << 0,
-    CAP_EXTRACTION  = 1 << 1
+    CAP_EXTRACTION  = 1 << 1,
+    CAP_PARSING     = 1 << 2,
+    CAP_ASYNC       = 1 << 3,
+    CAP_BROKEN      = 1 << 31, // used to report inconsistencies
 } plugin_caps_t;
 
 /*!
@@ -99,9 +102,12 @@ bool plugin_check_required_api_version(const plugin_handle_t* h, char* err);
 bool plugin_check_required_symbols(const plugin_handle_t* h, char* err);
 
 /*!
-    \brief Returns the capabilities supported by the given plugin handle
+    \brief Returns the capabilities supported by the given plugin handle.
+    In case of inconsistencies, the result will have the CAP_BROKEN bit set
+    and the err string will be filled up to PLUGIN_MAX_ERRLEN chars representing
+    the error encountered.
 */
-plugin_caps_t plugin_get_capabilities(const plugin_handle_t* h);
+plugin_caps_t plugin_get_capabilities(const plugin_handle_t* h, char* err);
 
 #ifdef __cplusplus
 }

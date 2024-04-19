@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -16,18 +17,18 @@ int BPF_PROG(umount2_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, UMOUNT2_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, UMOUNT2_E_SIZE, PPME_SYSCALL_UMOUNT2_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_UMOUNT2_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: flags (type: PT_FLAGS32) */
-	u32 flags = (u32)extract__syscall_argument(regs, 1);
-	ringbuf__store_u32(&ringbuf, flags);
+	int flags = (int)extract__syscall_argument(regs, 1);
+	ringbuf__store_u32(&ringbuf, umount2_flags_to_scap(flags));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

@@ -1,6 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
 #
-# zlib
+# Copyright (C) 2023 The Falco Authors.
 #
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations under the License.
+#
+
 option(USE_BUNDLED_ZLIB "Enable building of the bundled zlib" ${USE_BUNDLED_DEPS})
 
 if(ZLIB_INCLUDE)
@@ -46,7 +57,7 @@ else()
 				URL "https://github.com/madler/zlib/archive/v1.2.13.tar.gz"
 				URL_HASH "SHA256=1525952a0a567581792613a9723333d7f8cc20b87a81f920fb8bc7e3f2251428"
 				CONFIGURE_COMMAND ./configure --prefix=${ZLIB_SRC} ${ZLIB_CONFIGURE_FLAGS}
-				BUILD_COMMAND ${CMD_MAKE}
+				BUILD_COMMAND make
 				BUILD_IN_SOURCE 1
 				BUILD_BYPRODUCTS ${ZLIB_LIB}
 				INSTALL_COMMAND "")
@@ -55,13 +66,18 @@ else()
 			install(FILES ${ZLIB_HEADERS} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/zlib"
 					COMPONENT "libs-deps")
 		else()
-			set(ZLIB_LIB "${ZLIB_SRC}/zlib.lib")
+			if(BUILD_SHARED_LIBS)
+				set(ZLIB_LIB_SUFFIX "${CMAKE_SHARED_LIBRARY_SUFFIX}")
+			else()
+				set(ZLIB_LIB_SUFFIX "${CMAKE_STATIC_LIBRARY_SUFFIX}")
+			endif()
+			set(ZLIB_LIB "${ZLIB_SRC}/zlib${ZLIB_LIB_SUFFIX}")
 			ExternalProject_Add(zlib
 				PREFIX "${PROJECT_BINARY_DIR}/zlib-prefix"
 				URL "https://github.com/madler/zlib/archive/v1.2.13.tar.gz"
 				URL_HASH "SHA256=1525952a0a567581792613a9723333d7f8cc20b87a81f920fb8bc7e3f2251428"
 				CONFIGURE_COMMAND ""
-				BUILD_COMMAND nmake -f win32/Makefile.msc
+				BUILD_COMMAND nmake -f win32/Makefile.msc LOC=-DZLIB_WINAPI
 				BUILD_IN_SOURCE 1
 				BUILD_BYPRODUCTS ${ZLIB_LIB}
 				INSTALL_COMMAND "")

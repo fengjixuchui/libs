@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,20 +16,20 @@ int BPF_PROG(eventfd_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, EVENTFD_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, EVENTFD_E_SIZE, PPME_SYSCALL_EVENTFD_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_EVENTFD_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: initval (type: PT_UINT64) */
-	u32 initval = (u32)extract__syscall_argument(regs, 0);
-	ringbuf__store_u64(&ringbuf, (u64)initval);
+	uint32_t initval = (uint32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_u64(&ringbuf, (uint64_t)initval);
 
-	/* Parameter 2: flags (type: PT_FLAGS32) */
+	/* Parameter 2: flags (type: PT_UINT32) */
 	/* The syscall eventfd has no flags! only `eventfd2` has the `flags` param.
 	 * For compatibility with the event definition here we send `0` as flags.
 	 */
@@ -51,12 +52,12 @@ int BPF_PROG(eventfd_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, EVENTFD_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, EVENTFD_X_SIZE, PPME_SYSCALL_EVENTFD_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_EVENTFD_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

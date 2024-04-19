@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -16,25 +17,25 @@ int BPF_PROG(quotactl_e,
 	     long syscall_id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, QUOTACTL_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, QUOTACTL_E_SIZE, PPME_SYSCALL_QUOTACTL_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_QUOTACTL_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: cmd (type: PT_FLAGS16) */
 	uint32_t cmd = (uint32_t)extract__syscall_argument(regs, 0);
-	u16 scap_cmd = quotactl_cmd_to_scap(cmd);
+	uint16_t scap_cmd = quotactl_cmd_to_scap(cmd);
 	ringbuf__store_u16(&ringbuf, scap_cmd);
 
 	/* Parameter 2: type (type: PT_FLAGS8) */
 	ringbuf__store_u8(&ringbuf, quotactl_type_to_scap(cmd));
 
 	/* Parameter 3: id (type: PT_UINT32) */
-	u32 id = (u32)extract__syscall_argument(regs, 2);
+	uint32_t id = (uint32_t)extract__syscall_argument(regs, 2);
 	if(scap_cmd != PPM_Q_GETQUOTA &&
 	   scap_cmd != PPM_Q_SETQUOTA &&
 	   scap_cmd != PPM_Q_XGETQUOTA &&
@@ -49,7 +50,7 @@ int BPF_PROG(quotactl_e,
 	}
 
 	/* Parameter 4: quota_fmt (type: PT_FLAGS8) */
-	u8 quota_fmt = PPM_QFMT_NOT_USED;
+	uint8_t quota_fmt = PPM_QFMT_NOT_USED;
 	if(scap_cmd == PPM_Q_QUOTAON)
 	{
 		quota_fmt = quotactl_fmt_to_scap(id);
@@ -93,8 +94,8 @@ int BPF_PROG(quotactl_x,
 	unsigned long special_pointer = extract__syscall_argument(regs, 1);
 	auxmap__store_charbuf_param(auxmap, special_pointer, MAX_PATH, USER);
 
-	int32_t cmd = (int32_t)extract__syscall_argument(regs, 0);
-	u16 scap_cmd = quotactl_cmd_to_scap(cmd);
+	uint32_t cmd = (uint32_t)extract__syscall_argument(regs, 0);
+	uint16_t scap_cmd = quotactl_cmd_to_scap(cmd);
 
 	/* The `addr` argument is the address of an optional, command-
 	 * specific data structure that is copied in or out of the system.
@@ -232,10 +233,10 @@ int BPF_PROG(quotactl_x,
 	}
 
 	/* Parameter 14: quota_fmt_out (type: PT_FLAGS8) */
-	u32 quota_fmt_out = PPM_QFMT_NOT_USED;
+	uint32_t quota_fmt_out = PPM_QFMT_NOT_USED;
 	if(scap_cmd == PPM_Q_GETFMT)
 	{
-		u32 quota_fmt_out_tmp = 0;
+		uint32_t quota_fmt_out_tmp = 0;
 		bpf_probe_read_user(&quota_fmt_out_tmp, sizeof(quota_fmt_out_tmp), (void *)addr_pointer);
 		quota_fmt_out = quotactl_fmt_to_scap(quota_fmt_out_tmp);
 	}

@@ -1,9 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright (C) 2023 The Falco Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations under the License.
+#
+
 if(NOT HAVE_LIBSCAP)
 set(HAVE_LIBSCAP On)
 
-# This should be renamed in `LIBS_DIR` not `LIBSCAP_DIR`
-if(NOT LIBSCAP_DIR)
-	get_filename_component(LIBSCAP_DIR ${CMAKE_CURRENT_LIST_DIR}/../.. ABSOLUTE)
+if(NOT LIBS_DIR)
+	get_filename_component(LIBS_DIR ${CMAKE_CURRENT_LIST_DIR}/../.. ABSOLUTE)
 endif()
 
 option(USE_BUNDLED_DEPS "Enable bundled dependencies instead of using the system ones" ON)
@@ -12,8 +25,11 @@ include(GNUInstallDirs)
 
 include(ExternalProject)
 
+include(uthash)
+
 include(CheckSymbolExists)
 check_symbol_exists(strlcpy "string.h" HAVE_STRLCPY)
+check_symbol_exists(strlcat "string.h" HAVE_STRLCAT)
 
 if(HAVE_STRLCPY)
 	message(STATUS "Existing strlcpy found, will *not* use local definition")
@@ -21,8 +37,11 @@ else()
 	message(STATUS "No strlcpy found, will use local definition")
 endif()
 
-configure_file(${LIBSCAP_DIR}/userspace/common/common_config.h.in ${PROJECT_BINARY_DIR}/common/common_config.h)
-include_directories(${PROJECT_BINARY_DIR}/common)
+if(HAVE_STRLCAT)
+	message(STATUS "Existing strlcat found, will *not* use local definition")
+else()
+	message(STATUS "No strlcat found, will use local definition")
+endif()
 
 add_definitions(-DPLATFORM_NAME="${CMAKE_SYSTEM_NAME}")
 
@@ -34,8 +53,8 @@ else()
 	get_filename_component(DRIVER_CONFIG_DIR ${PROJECT_SOURCE_DIR}/driver ABSOLUTE)
 endif()
 
-get_filename_component(LIBSCAP_INCLUDE_DIR ${LIBSCAP_DIR}/userspace/libscap ABSOLUTE)
-set(LIBSCAP_INCLUDE_DIRS ${LIBSCAP_INCLUDE_DIR} ${DRIVER_CONFIG_DIR})
+get_filename_component(LIBSCAP_INCLUDE_DIR ${LIBS_DIR}/userspace/libscap ABSOLUTE)
+set(LIBSCAP_INCLUDE_DIRS ${LIBSCAP_INCLUDE_DIR} ${PROJECT_BINARY_DIR} ${DRIVER_CONFIG_DIR})
 
 function(set_scap_target_properties target)
 	set_target_properties(${target} PROPERTIES
@@ -44,43 +63,69 @@ function(set_scap_target_properties target)
 	)
 endfunction()
 
-add_subdirectory(${LIBSCAP_DIR}/userspace/libscap ${PROJECT_BINARY_DIR}/libscap)
+add_subdirectory(${LIBS_DIR}/userspace/libscap ${PROJECT_BINARY_DIR}/libscap)
 
-# We can switch to using the MANUALLY_ADDED_DEPENDENCIES when our minimum
-# CMake version is 3.8 or later.
-set(LIBSCAP_LIBS
-	scap
-	scap_engine_noop
-	scap_engine_source_plugin
-	scap_error
-	scap_event_schema)
+set(LIBSCAP_INSTALL_LIBS)
 
-set(libscap_conditional_libs
-	driver_event_schema
-	pman
-	scap_engine_bpf
-	scap_engine_gvisor
-	scap_engine_kmod
-	scap_engine_modern_bpf
-	scap_engine_nodriver
-	scap_engine_savefile
-	scap_engine_test_input
-	scap_engine_udig
-	scap_engine_util
-	scap_platform)
+# All of the targets in userspace/libscap
+get_directory_property(libscap_subdirs DIRECTORY ${LIBS_DIR}/userspace/libscap SUBDIRECTORIES)
+set(libscap_subdir_targets)
+foreach(libscap_subdir ${LIBS_DIR}/userspace/libscap ${libscap_subdirs})
+	get_directory_property(subdir_targets DIRECTORY ${libscap_subdir} BUILDSYSTEM_TARGETS)
+	list(APPEND libscap_subdir_targets ${subdir_targets})
+endforeach()
 
-foreach(libscap_conditional_lib ${libscap_conditional_libs})
-	if(TARGET ${libscap_conditional_lib})
-		list(APPEND LIBSCAP_LIBS ${libscap_conditional_lib})
+set(install_lib_type STATIC_LIBRARY)
+if (BUILD_SHARED_LIBS)
+	set(install_lib_type SHARED_LIBRARY)
+endif()
+
+# Installation targets only
+foreach(libscap_subdir_target ${libscap_subdir_targets})
+	get_target_property(cl_target_type ${libscap_subdir_target} TYPE)
+	if (${cl_target_type} STREQUAL ${install_lib_type})
+		list(APPEND LIBSCAP_INSTALL_LIBS ${libscap_subdir_target})
 	endif()
 endforeach()
 
-install(TARGETS ${LIBSCAP_LIBS}
-			ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/${LIBS_PACKAGE_NAME}"
-			LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/${LIBS_PACKAGE_NAME}"
+# Installation targets and their dependencies
+set(libscap_link_libraries)
+set(libscap_link_libdirs)
+foreach(libscap_install_lib ${LIBSCAP_INSTALL_LIBS})
+	list(APPEND libscap_link_libraries ${libscap_install_lib})
+	get_target_property(install_lib_link_libraries ${libscap_install_lib} LINK_LIBRARIES)
+	foreach (install_lib_link_library ${install_lib_link_libraries})
+		if (NOT ${install_lib_link_library} IN_LIST libscap_subdir_targets)
+			if(${install_lib_link_library} MATCHES "/")
+				# We have a path. Convert it to -L<dir> + -l<lib>.
+				get_filename_component(scap_lib_dir ${install_lib_link_library} DIRECTORY)
+				list(APPEND libscap_link_libdirs -L${scap_lib_dir})
+				get_filename_component(scap_lib_base ${install_lib_link_library} NAME_WE)
+				string(REGEX REPLACE "^lib" "" scap_lib_base ${scap_lib_base})
+				list(APPEND libscap_link_libraries ${scap_lib_base})
+			else()
+				list(APPEND libscap_link_libraries ${install_lib_link_library})
+			endif()
+		endif()
+	endforeach()
+endforeach()
+list(REMOVE_DUPLICATES libscap_link_libraries)
+
+set(libscap_link_flags)
+foreach(libscap_link_library ${libscap_link_libraries})
+	list(APPEND libscap_link_flags "-l${libscap_link_library}")
+endforeach()
+
+string(REPLACE ";" " " LIBSCAP_LINK_LIBRARIES_FLAGS "${libscap_link_flags}")
+string(REPLACE ";" " " LIBSCAP_LINK_LIBDIRS_FLAGS "${libscap_link_libdirs}")
+configure_file(${LIBS_DIR}/userspace/libscap/libscap.pc.in ${PROJECT_BINARY_DIR}/libscap/libscap.pc @ONLY)
+
+install(TARGETS ${LIBSCAP_INSTALL_LIBS}
+			ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+			LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 			RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 			COMPONENT "scap" OPTIONAL)
-install(DIRECTORY "${LIBSCAP_INCLUDE_DIR}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/userspace"
+install(DIRECTORY "${LIBSCAP_INCLUDE_DIR}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}"
 			COMPONENT "scap"
 			FILES_MATCHING PATTERN "*.h"
 			PATTERN "*examples*" EXCLUDE
@@ -88,14 +133,10 @@ install(DIRECTORY "${LIBSCAP_INCLUDE_DIR}" DESTINATION "${CMAKE_INSTALL_INCLUDED
 install(DIRECTORY "${DRIVER_CONFIG_DIR}/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/driver"
 			COMPONENT "scap"
 			FILES_MATCHING PATTERN "*.h")
-install(DIRECTORY "${LIBSCAP_DIR}/userspace/common" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/userspace"
-			COMPONENT "scap"
-			FILES_MATCHING PATTERN "*.h")
-install(DIRECTORY "${PROJECT_BINARY_DIR}/common" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/userspace"
-			COMPONENT "scap"
-			FILES_MATCHING PATTERN "*.h")
-install(DIRECTORY "${LIBSCAP_DIR}/userspace/plugin" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/userspace"
+install(DIRECTORY "${LIBS_DIR}/userspace/plugin" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}"
 		COMPONENT "scap"
 		FILES_MATCHING PATTERN "*.h")
+install(FILES ${PROJECT_BINARY_DIR}/libscap/scap_config.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/libscap)
+install(FILES ${PROJECT_BINARY_DIR}/libscap/scap_strl_config.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${LIBS_PACKAGE_NAME}/libscap)
 install(FILES ${PROJECT_BINARY_DIR}/libscap/libscap.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 endif()

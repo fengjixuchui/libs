@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 Copyright (C) 2023 The Falco Authors.
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
@@ -9,7 +10,7 @@ or GPL2.txt for full copies of the license.
 /* Possible snaplen */
 #define SNAPLEN 80
 #define SNAPLEN_EXTENDED 2000
-#define SNAPLEN_TRACERS_ENABLED 4096
+// #define SNAPLEN_TRACERS_ENABLED 4096 // note: deprecated
 #define SNAPLEN_FULLCAPTURE_PORT 16000
 #define SNAPLEN_MAX 65000
 
@@ -31,4 +32,8 @@ or GPL2.txt for full copies of the license.
 #define BPF_HTTP_PREFIX 0x50545448
 
 /* Convert seconds to nanoseconds */
-#define SECOND_TO_NS 1000000000
+#define SECOND_TO_NS 1000000000ULL
+
+#ifdef PAGE_SIZE
+	#define STR_STORAGE_SIZE PAGE_SIZE
+#endif

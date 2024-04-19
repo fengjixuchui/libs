@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,16 +18,17 @@ limitations under the License.
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "scap.h"
-#include "scap-int.h"
-#include "scap_linux_int.h"
-#include "strlcpy.h"
-#include "strerror.h"
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
+#include <libscap/linux/scap_linux_int.h>
+#include <libscap/linux/scap_linux_platform.h>
+#include <libscap/strl.h>
+#include <libscap/strerror.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
-#include "uthash.h"
-#include "compat/misc.h"
+#include <libscap/uthash_ext.h>
+#include <libscap/compat/misc.h>
 #include <inttypes.h>
 #include <unistd.h>
 #include <sys/param.h>
@@ -94,7 +96,8 @@ int32_t scap_fd_handle_pipe(struct scap_proclist* proclist, char *fname, scap_th
 	strlcpy(fdi->info.fname, link_name, sizeof(fdi->info.fname));
 
 	fdi->ino = ino;
-	return scap_add_fd_to_proc_table(proclist, tinfo, fdi, error);
+	proclist->m_proc_callback(proclist->m_proc_callback_context, error, tinfo->tid, tinfo, fdi, NULL);
+	return SCAP_SUCCESS;
 }
 
 static inline uint32_t open_flags_to_scap(unsigned long flags)
@@ -162,14 +165,15 @@ static inline uint32_t open_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-uint32_t scap_get_device_by_mount_id(scap_t *handle, const char *procdir, unsigned long requested_mount_id)
+uint32_t scap_linux_get_device_by_mount_id(struct scap_platform *platform, const char *procdir, unsigned long requested_mount_id)
 {
 	char fd_dir_name[SCAP_MAX_PATH_SIZE];
 	char line[SCAP_MAX_PATH_SIZE];
 	FILE *finfo;
 	scap_mountinfo *mountinfo;
+	struct scap_linux_platform *linux_platform = (struct scap_linux_platform *)platform;
 
-	HASH_FIND_INT64(handle->m_dev_list, &requested_mount_id, mountinfo);
+	HASH_FIND_INT64(linux_platform->m_dev_list, &requested_mount_id, mountinfo);
 	if(mountinfo != NULL)
 	{
 		return mountinfo->dev;
@@ -199,7 +203,7 @@ uint32_t scap_get_device_by_mount_id(scap_t *handle, const char *procdir, unsign
 				int32_t uth_status = SCAP_SUCCESS;
 				mountinfo->mount_id = mount_id;
 				mountinfo->dev = dev;
-				HASH_ADD_INT64(handle->m_dev_list, mount_id, mountinfo);
+				HASH_ADD_INT64(linux_platform->m_dev_list, mount_id, mountinfo);
 				if(uth_status != SCAP_SUCCESS)
 				{
 					free(mountinfo);
@@ -321,6 +325,10 @@ int32_t scap_fd_handle_regular_file(struct scap_proclist *proclist, char *fname,
 		{
 			fdi->type = SCAP_FD_BPF;
 		}
+		else if (0 == strcmp(link_name, "anon_inode:[pidfd]"))
+		{
+			fdi->type = SCAP_FD_PIDFD;
+		}
 
 		if(SCAP_FD_UNSUPPORTED == fdi->type)
 		{
@@ -331,15 +339,24 @@ int32_t scap_fd_handle_regular_file(struct scap_proclist *proclist, char *fname,
 	}
 	else if(fdi->type == SCAP_FD_FILE_V2)
 	{
-		scap_fd_flags_file(fdi, procdir);
-		strlcpy(fdi->info.regularinfo.fname, link_name, sizeof(fdi->info.regularinfo.fname));
+		if (0 == strncmp(link_name, "/memfd:", strlen("/memfd:")))
+		{
+			fdi->type = SCAP_FD_MEMFD;
+			strlcpy(fdi->info.fname, link_name, sizeof(fdi->info.fname));
+		}
+		else
+		{
+			scap_fd_flags_file(fdi, procdir);
+			strlcpy(fdi->info.regularinfo.fname, link_name, sizeof(fdi->info.regularinfo.fname));
+		}
 	}
 	else
 	{
 		strlcpy(fdi->info.fname, link_name, sizeof(fdi->info.fname));
 	}
 
-	return scap_add_fd_to_proc_table(proclist, tinfo, fdi, error);
+	proclist->m_proc_callback(proclist->m_proc_callback_context, error, tinfo->tid, tinfo, fdi, NULL);
+	return SCAP_SUCCESS;
 }
 
 int32_t scap_fd_handle_socket(struct scap_proclist *proclist, char *fname, scap_threadinfo *tinfo, scap_fdinfo *fdi, char* procdir, uint64_t net_ns, struct scap_ns_socket_list **sockets_by_ns, char *error)
@@ -402,7 +419,8 @@ int32_t scap_fd_handle_socket(struct scap_proclist *proclist, char *fname, scap_
 	{
 		// it's a kind of socket, but we don't support it right now
 		fdi->type = SCAP_FD_UNSUPPORTED;
-		return scap_add_fd_to_proc_table(proclist, tinfo, fdi, error);
+		proclist->m_proc_callback(proclist->m_proc_callback_context, error, tinfo->tid, tinfo, fdi, NULL);
+		return SCAP_SUCCESS;
 	}
 
 	//
@@ -414,12 +432,9 @@ int32_t scap_fd_handle_socket(struct scap_proclist *proclist, char *fname, scap_
 		memcpy(&(fdi->info), &(tfdi->info), sizeof(fdi->info));
 		fdi->ino = ino;
 		fdi->type = tfdi->type;
-		return scap_add_fd_to_proc_table(proclist, tinfo, fdi, error);
+		proclist->m_proc_callback(proclist->m_proc_callback_context, error, tinfo->tid, tinfo, fdi, NULL);
 	}
-	else
-	{
-		return SCAP_SUCCESS;
-	}
+	return SCAP_SUCCESS;
 }
 
 int32_t scap_fd_read_unix_sockets_from_proc_fs(const char* filename, scap_fdinfo **sockets, char *error)
@@ -567,7 +582,6 @@ int32_t scap_fd_read_netlink_sockets_from_proc_fs(const char* filename, scap_fdi
 	f = fopen(filename, "r");
 	if(NULL == f)
 	{
-		ASSERT(false);
 		return scap_errprintf(error, errno, "Could not open netlink sockets file %s", filename);
 	}
 	while(NULL != fgets(line, sizeof(line), f))
@@ -721,7 +735,6 @@ int32_t scap_fd_read_ipv4_sockets_from_proc_fs(const char *dir, int l4proto, sca
 	f = fopen(dir, "r");
 	if(NULL == f)
 	{
-		ASSERT(false);
 		free(scan_buf);
 		return scap_errprintf(error, errno, "Could not open ipv4 sockets dir %s", dir);
 	}
@@ -906,7 +919,6 @@ int32_t scap_fd_read_ipv6_sockets_from_proc_fs(char *dir, int l4proto, scap_fdin
 
 	if(NULL == f)
 	{
-		ASSERT(false);
 		free(scan_buf);
 		return scap_errprintf(error, errno, "Could not open ipv6 sockets dir %s", dir);
 	}
@@ -1229,7 +1241,7 @@ char * decode_st_mode(struct stat* sb)
 //
 // Scan the directory containing the fd's of a proc /proc/x/fd
 //
-int32_t scap_fd_scan_fd_dir(scap_t *handle, char *procdir, scap_threadinfo *tinfo, struct scap_ns_socket_list **sockets_by_ns, uint64_t* num_fds_ret, char *error)
+int32_t scap_fd_scan_fd_dir(struct scap_linux_platform *linux_platform, struct scap_proclist *proclist, char *procdir, scap_threadinfo *tinfo, struct scap_ns_socket_list **sockets_by_ns, uint64_t* num_fds_ret, char *error)
 {
 	DIR *dir_p;
 	struct dirent *dir_entry_p;
@@ -1239,7 +1251,7 @@ int32_t scap_fd_scan_fd_dir(scap_t *handle, char *procdir, scap_threadinfo *tinf
 	char link_name[SCAP_MAX_PATH_SIZE];
 	struct stat sb;
 	uint64_t fd;
-	scap_fdinfo *fdi = NULL;
+	scap_fdinfo fdi = {};
 	uint64_t net_ns;
 	ssize_t r;
 	uint32_t fd_added = 0;
@@ -1276,19 +1288,19 @@ int32_t scap_fd_scan_fd_dir(scap_t *handle, char *procdir, scap_threadinfo *tinf
 	}
 
 	while((dir_entry_p = readdir(dir_p)) != NULL &&
-		(handle->m_fd_lookup_limit == 0 || fd_added < handle->m_fd_lookup_limit))
+		(linux_platform->m_fd_lookup_limit == 0 || fd_added < linux_platform->m_fd_lookup_limit))
 	{
-		fdi = NULL;
 		snprintf(f_name, SCAP_MAX_PATH_SIZE, "%s/%s", fd_dir_name, dir_entry_p->d_name);
 
 		if(-1 == stat(f_name, &sb) || 1 != sscanf(dir_entry_p->d_name, "%"PRIu64, &fd))
 		{
 			continue;
 		}
+		fdi.fd = fd;
 
 		// In no driver mode to limit cpu usage we just parse sockets
 		// because we are interested only on them
-		if(handle->m_minimal_scan && !S_ISSOCK(sb.st_mode))
+		if(linux_platform->m_minimal_scan && !S_ISSOCK(sb.st_mode))
 		{
 			continue;
 		}
@@ -1296,72 +1308,31 @@ int32_t scap_fd_scan_fd_dir(scap_t *handle, char *procdir, scap_threadinfo *tinf
 		switch(sb.st_mode & S_IFMT)
 		{
 		case S_IFIFO:
-			res = scap_fd_allocate_fdinfo(&fdi, fd, SCAP_FD_FIFO);
-			if(SCAP_FAILURE == res)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "can't allocate scap fd handle for fifo fd %" PRIu64, fd);
-				break;
-			}
-			res = scap_fd_handle_pipe(&handle->m_proclist, f_name, tinfo, fdi, error);
+			fdi.type = SCAP_FD_FIFO;
+			res = scap_fd_handle_pipe(proclist, f_name, tinfo, &fdi, error);
 			break;
 		case S_IFREG:
 		case S_IFBLK:
 		case S_IFCHR:
 		case S_IFLNK:
-			res = scap_fd_allocate_fdinfo(&fdi, fd, SCAP_FD_FILE_V2);
-			if(SCAP_FAILURE == res)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "can't allocate scap fd handle for file fd %" PRIu64, fd);
-				break;
-			}
-			fdi->ino = sb.st_ino;
-			res = scap_fd_handle_regular_file(&handle->m_proclist, f_name, tinfo, fdi, procdir, error);
+			fdi.type = SCAP_FD_FILE_V2;
+			fdi.ino = sb.st_ino;
+			res = scap_fd_handle_regular_file(proclist, f_name, tinfo, &fdi, procdir, error);
 			break;
 		case S_IFDIR:
-			res = scap_fd_allocate_fdinfo(&fdi, fd, SCAP_FD_DIRECTORY);
-			if(SCAP_FAILURE == res)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "can't allocate scap fd handle for dir fd %" PRIu64, fd);
-				break;
-			}
-			fdi->ino = sb.st_ino;
-			res = scap_fd_handle_regular_file(&handle->m_proclist, f_name, tinfo, fdi, procdir, error);
+			fdi.type = SCAP_FD_DIRECTORY;
+			fdi.ino = sb.st_ino;
+			res = scap_fd_handle_regular_file(proclist, f_name, tinfo, &fdi, procdir, error);
 			break;
 		case S_IFSOCK:
-			res = scap_fd_allocate_fdinfo(&fdi, fd, SCAP_FD_UNKNOWN);
-			if(SCAP_FAILURE == res)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "can't allocate scap fd handle for sock fd %" PRIu64, fd);
-				break;
-			}
-			res = scap_fd_handle_socket(&handle->m_proclist, f_name, tinfo, fdi, procdir, net_ns, sockets_by_ns, error);
-			if(handle->m_proclist.m_proc_callback == NULL)
-			{
-				// we can land here if we've got a netlink socket
-				if(fdi->type == SCAP_FD_UNKNOWN)
-				{
-					scap_fd_free_fdinfo(&fdi);
-				}
-			}
+			fdi.type = SCAP_FD_UNKNOWN;
+			res = scap_fd_handle_socket(proclist, f_name, tinfo, &fdi, procdir, net_ns, sockets_by_ns, error);
 			break;
 		default:
-			res = scap_fd_allocate_fdinfo(&fdi, fd, SCAP_FD_UNSUPPORTED);
-			if(SCAP_FAILURE == res)
-			{
-				snprintf(error, SCAP_LASTERR_SIZE, "can't allocate scap fd handle for unsupported fd %" PRIu64, fd);
-				break;
-			}
-			fdi->ino = sb.st_ino;
-			res = scap_fd_handle_regular_file(&handle->m_proclist, f_name, tinfo, fdi, procdir, error);
+			fdi.type = SCAP_FD_UNSUPPORTED;
+			fdi.ino = sb.st_ino;
+			res = scap_fd_handle_regular_file(proclist, f_name, tinfo, &fdi, procdir, error);
 			break;
-		}
-
-		if(handle->m_proclist.m_proc_callback != NULL)
-		{
-			if(fdi)
-			{
-				scap_fd_free_fdinfo(&fdi);
-			}
 		}
 
 		if(SCAP_SUCCESS != res)

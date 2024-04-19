@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,10 +21,16 @@ limitations under the License.
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <libscap/scap_log.h>
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+	/* Forward declare them */
+	struct metrics_v2;
+	struct scap_stats;
 
 	/* `libpman` return values convention:
 	 * In case of success `0` is returned otherwise `errno`. If `errno` is not
@@ -45,13 +52,14 @@ extern "C"
 	 * - set available number of CPUs.
 	 * - set dimension of a single per-CPU ring buffer.
 	 *
-	 * @param verbosity use `true` if you want to activate libbpf verbosity.
+	 * @param log_fn logging callback
 	 * @param buf_bytes_dim dimension of a single per-CPU buffer in bytes.
 	 * @param cpus_for_each_buffer number of CPUs to which we want to associate a ring buffer.
 	 * @param allocate_online_only if true, allocate ring buffers taking only into account online CPUs.
 	 * @return `0` on success, `-1` in case of error.
 	 */
-	int pman_init_state(bool verbosity, unsigned long buf_bytes_dim, uint16_t cpus_for_each_buffer, bool allocate_online_only);
+	int pman_init_state(falcosecurity_log_fn log_fn, unsigned long buf_bytes_dim, uint16_t cpus_for_each_buffer,
+			    bool allocate_online_only);
 
 	/**
 	 * @brief Clear the `libpman` global state before it is used.
@@ -98,6 +106,7 @@ extern "C"
 	 * - bpf_skeleton
 	 * - ringbuffer manager
 	 * - consumers/producers vectors
+	 * - stats buffer dynamically allocated
 	 */
 	void pman_close_probe(void);
 
@@ -105,7 +114,7 @@ extern "C"
 	// ATTACH PROGRAMS
 	/////////////////////////////
 
-/// todo(@Andreagit97): these methods probably shouldn't be exposed to the final users
+	/// todo(@Andreagit97): these methods probably shouldn't be exposed to the final users
 	/**
 	 * @brief Attach only the syscall_exit_dispatcher
 	 *
@@ -275,33 +284,31 @@ extern "C"
 	 * @brief Instrument the bpf probe with the right sc_set. This API
 	 * sets both interesting syscalls and interesting tracepoints.
 	 *
-	 * @param sc_set pointer to the interesting sc_set 
+	 * @param sc_set pointer to the interesting sc_set
 	 *
 	 * @return `0` on success, `1` in case of error.
 	 */
-	int pman_enforce_sc_set(bool *sc_set);
+	int pman_enforce_sc_set(bool* sc_set);
 
 	/**
 	 * @brief Receive a pointer to `struct scap_stats` and fill it
 	 * with info about the number of events and number of drops.
 	 *
-	 * @param scap_stats_struct opaque pointer to `struct scap_stats`.
-	 * We used an opaque pointer because we don't want to introduce scap
-	 * definitions in this file.
+	 * @param scap_stats_struct pointer to `struct scap_stats`.
 	 * @return `0` on success, `errno` in case of error.
 	 */
-	int pman_get_scap_stats(void* scap_stats_struct);
+	int pman_get_scap_stats(struct scap_stats* scap_stats_struct);
 
 	/**
-	 * @brief Get scap_stats_v2 structure filled with the statistics.
+	 * @brief Return a `metrics_v2` struct filled with statistics.
 	 *
-	 * @param scap_stats_v2_struct opaque pointer to `struct scap_stats_v2` held in modern_bpf_engine handle
 	 * @param flags holding statistics category flags.
-	 * @param nstats Pointer reflecting number of statistics in returned buffer.
+	 * @param nstats number of stats allocated.
+	 * @param rc return code, SCAP_FAILURE in case of error.
 	 *
-	 * @return `0` on success, `errno` in case of error.
+	 * @return pointer to `struct metrics_v2`
 	 */
-	int pman_get_scap_stats_v2(void* scap_stats_v2_struct, uint32_t flags, uint32_t* nstats);
+	struct metrics_v2* pman_get_metrics_v2(uint32_t flags, uint32_t* nstats, int32_t* rc);
 
 	/**
 	 * @brief Receive an array with `nCPUs` elements. For every CPU

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,12 +16,12 @@ limitations under the License.
 
 */
 
-#include "container_engine/mesos.h"
+#include <libsinsp/container_engine/mesos.h>
 
 #include <unistd.h>
 
-#include "sinsp.h"
-#include "sinsp_int.h"
+#include <libsinsp/sinsp.h>
+#include <libsinsp/sinsp_int.h>
 
 bool libsinsp::container_engine::mesos::match(sinsp_threadinfo* tinfo, sinsp_container_info &container_info)
 {
@@ -61,6 +62,7 @@ bool libsinsp::container_engine::mesos::resolve(sinsp_threadinfo* tinfo, bool qu
 	if(container_cache().should_lookup(container.m_id, CT_MESOS))
 	{
 		container.m_name = container.m_id;
+		container.set_lookup_status(sinsp_container_lookup::state::SUCCESSFUL);
 		container_cache().add_container(std::make_shared<sinsp_container_info>(container), tinfo);
 		container_cache().notify_new_container(container, tinfo);
 	}
@@ -122,12 +124,12 @@ bool libsinsp::container_engine::mesos::set_mesos_task_id(sinsp_container_info &
 			if(!mtid.empty() && mtid.length()>=3 &&
 			   (mtid.find_first_of("._") != std::string::npos))
 			{
-				g_logger.log("Mesos native container: [" + container.m_id + "], Mesos task ID: " + mtid, sinsp_logger::SEV_DEBUG);
+				libsinsp_logger()->log("Mesos native container: [" + container.m_id + "], Mesos task ID: " + mtid, sinsp_logger::SEV_DEBUG);
 				return true;
 			}
 			else
 			{
-				g_logger.log("Mesos container [" + container.m_id + "],"
+				libsinsp_logger()->log("Mesos container [" + container.m_id + "],"
 										     "thread [" + std::to_string(tinfo->m_tid) +
 					     "], has likely malformed mesos task id [" + mtid + "], ignoring", sinsp_logger::SEV_DEBUG);
 			}

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,29 +16,29 @@ int BPF_PROG(splice_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SPLICE_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SPLICE_E_SIZE, PPME_SYSCALL_SPLICE_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_SPLICE_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: fd_in (type: PT_FD) */
-	s32 fd_in = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)fd_in);
+	int32_t fd_in = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd_in);
 
 	/* Parameter 2: fd_out (type: PT_FD) */
-	s32 fd_out = (s32)extract__syscall_argument(regs, 2);
-	ringbuf__store_s64(&ringbuf, (s64)fd_out);
+	int32_t fd_out = (int32_t)extract__syscall_argument(regs, 2);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd_out);
 
 	/* Parameter 3: size (type: PT_UINT64) */
-	u64 size = extract__syscall_argument(regs, 4);
+	uint64_t size = extract__syscall_argument(regs, 4);
 	ringbuf__store_u64(&ringbuf, size);
 
 	/* Parameter 4: flags (type: PT_FLAGS32) */
-	u32 flags = extract__syscall_argument(regs, 5);
+	uint32_t flags = extract__syscall_argument(regs, 5);
 	ringbuf__store_u32(&ringbuf, splice_flags_to_scap(flags));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
@@ -57,17 +58,17 @@ int BPF_PROG(splice_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SPLICE_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SPLICE_X_SIZE, PPME_SYSCALL_SPLICE_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_SPLICE_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: res (type: PT_ERRNO) */
-	ringbuf__store_s64(&ringbuf, (s64)ret);
+	ringbuf__store_s64(&ringbuf, (int64_t)ret);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

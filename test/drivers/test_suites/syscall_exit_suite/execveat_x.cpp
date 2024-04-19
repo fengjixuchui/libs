@@ -15,7 +15,7 @@ TEST(SyscallExit, execveatX_failure)
 	/*=============================== TRIGGER SYSCALL  ===========================*/
 
 	/* Get all the info from proc. */
-	struct proc_info info = {0};
+	struct proc_info info = {};
 	pid_t pid = ::getpid();
 	if(!get_proc_info(pid, &info))
 	{
@@ -27,7 +27,7 @@ TEST(SyscallExit, execveatX_failure)
 	 */
 
 	/* On kernels >= 5.8 the suggested version should be `_LINUX_CAPABILITY_VERSION_3` */
-	struct __user_cap_header_struct header = {0};
+	struct __user_cap_header_struct header = {};
 	struct __user_cap_data_struct data[_LINUX_CAPABILITY_U32S_3];
 	cap_user_header_t hdrp = &header;
 	cap_user_data_t datap = data;
@@ -125,7 +125,7 @@ TEST(SyscallExit, execveatX_failure)
 	/* If we run in a namespace different from the init one probably this will fail. */
 	evt_test->assert_numeric_param(18, (int64_t)info.pgid);
 
-	/* Parameter 19: loginuid (type: PT_UINT32) */
+	/* Parameter 19: loginuid (type: PT_UID) */
 	evt_test->assert_numeric_param(19, (uint32_t)info.loginuid);
 
 	/* PPM_EXE_WRITABLE is set when the user that executed a process can also write to the executable
@@ -151,12 +151,16 @@ TEST(SyscallExit, execveatX_failure)
 	/* Parameter 26: exe_file mtime (last modification time, epoch value in nanoseconds) (type: PT_ABSTIME) */
 	evt_test->assert_numeric_param(26, (uint64_t)1000000000000000000, GREATER_EQUAL);
 
-	/* Parameter 27: uid (type: PT_UINT32) */
+	/* Parameter 27: euid (type: PT_UID) */
 	evt_test->assert_numeric_param(27, (uint32_t)geteuid(), EQUAL);
+
+	/* Parameter 28: trusted_exepath (type: PT_FSPATH) */
+	/* Here we don't call the execveat so the result should be the full path to the drivers test executable */
+	evt_test->assert_charbuf_param(28, info.exepath);
 
 	/*=============================== ASSERT PARAMETERS  ===========================*/
 
-	evt_test->assert_num_params_pushed(27);
+	evt_test->assert_num_params_pushed(28);
 }
 
 /* All architectures return an `EXECVEAT_X` event when the syscall fails, but only
@@ -174,7 +178,6 @@ TEST(SyscallExit, execveatX_correct_exit)
 	/* Prepare the execve args */
 	int dirfd = 0;
 	const char *pathname = "/usr/bin/echo";
-	const char *comm = "echo";
 	const char *argv[] = {pathname, "[OUTPUT] SyscallExit.execveatX_success test", NULL};
 	const char *envp[] = {"IN_TEST=yes", "3_ARGUMENT=yes", "2_ARGUMENT=no", NULL};
 	int flags = 0;
@@ -182,7 +185,7 @@ TEST(SyscallExit, execveatX_correct_exit)
 	/* We need to use `SIGCHLD` otherwise the parent won't receive any signal
 	 * when the child terminates.
 	 */
-	struct clone_args cl_args = {0};
+	clone_args cl_args = {};
 	cl_args.exit_signal = SIGCHLD;
 	pid_t ret_pid = syscall(__NR_clone3, &cl_args, sizeof(cl_args));
 
@@ -208,7 +211,7 @@ TEST(SyscallExit, execveatX_correct_exit)
 
 	evt_test->disable_capture();
 
-#if __s390x__
+#if defined(__s390x__) || defined(__riscv) || defined(__powerpc64__)
 	/* We search for a child event. */
 	evt_test->assert_event_presence(ret_pid);
 
@@ -222,6 +225,8 @@ TEST(SyscallExit, execveatX_correct_exit)
 	evt_test->assert_header();
 
 	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	const char *comm = "echo";
 
 	/* Please note here we cannot assert all the params, we check only the possible ones. */
 
@@ -272,12 +277,15 @@ TEST(SyscallExit, execveatX_correct_exit)
 	/* Parameter 26: exe_file mtime (last modification time, epoch value in nanoseconds) (type: PT_ABSTIME) */
 	evt_test->assert_numeric_param(26, (uint64_t)1000000000000000000, GREATER_EQUAL);
 
-	/* Parameter 27: uid (type: PT_UINT32) */
+	/* Parameter 27: euid (type: PT_UID) */
 	evt_test->assert_numeric_param(27, (uint32_t)geteuid(), EQUAL);
+
+	/* Parameter 28: trusted_exepath (type: PT_FSPATH) */
+	evt_test->assert_charbuf_param(28, pathname);
 
 	/*=============================== ASSERT PARAMETERS  ===========================*/
 
-	evt_test->assert_num_params_pushed(27);
+	evt_test->assert_num_params_pushed(28);
 #else
 	/* We search for a child event. */
 	evt_test->assert_event_absence(ret_pid);
@@ -303,7 +311,7 @@ TEST(SyscallExit, execveatX_execve_exit)
 	/* We need to use `SIGCHLD` otherwise the parent won't receive any signal
 	 * when the child terminates.
 	 */
-	struct clone_args cl_args = {0};
+	clone_args cl_args = {};
 	cl_args.exit_signal = SIGCHLD;
 	pid_t ret_pid = syscall(__NR_clone3, &cl_args, sizeof(cl_args));
 
@@ -330,7 +338,7 @@ TEST(SyscallExit, execveatX_execve_exit)
 	evt_test->disable_capture();
 
 /* `s390x` returns an `EXECVEAT_X` event while other architectures retun an `EXECVE_X` */
-#if defined(__s390x__)
+#if defined(__s390x__) || defined(__riscv) || defined(__powerpc64__)
 	/* We search for a child event. */
 	evt_test->assert_event_absence(ret_pid, PPME_SYSCALL_EXECVE_19_X);
 #else
@@ -397,12 +405,143 @@ TEST(SyscallExit, execveatX_execve_exit)
 	/* Parameter 26: exe_file mtime (last modification time, epoch value in nanoseconds) (type: PT_ABSTIME) */
 	evt_test->assert_numeric_param(26, (uint64_t)1000000000000000000, GREATER_EQUAL);
 
-	/* Parameter 27: uid (type: PT_UINT32) */
+	/* Parameter 27: euid (type: PT_UID) */
 	evt_test->assert_numeric_param(27, (uint32_t)geteuid(), EQUAL);
+
+	/* Parameter 28: trusted_exepath (type: PT_FSPATH) */
+	evt_test->assert_charbuf_param(28, pathname);
 
 	/*=============================== ASSERT PARAMETERS  ===========================*/
 
-	evt_test->assert_num_params_pushed(27);
+	evt_test->assert_num_params_pushed(28);
 #endif
 }
+
+#if defined(__NR_memfd_create) && defined(__NR_openat) && defined(__NR_read) && defined(__NR_write)
+#include <sys/mman.h>
+TEST(SyscallExit, execveatX_success_memfd)
+{
+	auto evt_test = get_syscall_event_test(__NR_execveat, EXIT_EVENT);
+
+	evt_test->enable_capture();
+
+	/*=============================== TRIGGER SYSCALL  ===========================*/
+
+	int mem_fd = syscall(__NR_memfd_create, "malware", MFD_CLOEXEC);
+	assert_syscall_state(SYSCALL_SUCCESS, "memfd_create", mem_fd, NOT_EQUAL, -1);
+
+	/* Open the executable to copy */
+	int fd_to_read = syscall(__NR_openat, 0, "/usr/bin/echo", O_RDWR);
+	if(fd_to_read < 0)
+	{
+		FAIL() << "failed to open the file to read\n";
+	}
+
+	char buf[200];
+	ssize_t bytes_read = 200;
+	while(bytes_read != 0)
+	{
+		bytes_read = syscall(__NR_read, fd_to_read, buf, sizeof(buf));
+		if(bytes_read < 0)
+		{
+			syscall(__NR_close, fd_to_read);
+			syscall(__NR_close, mem_fd);
+			FAIL() << "unable to read from file\n";
+		}
+
+		bytes_read = syscall(__NR_write, mem_fd, buf, bytes_read);
+		if(bytes_read < 0)
+		{
+			syscall(__NR_close, fd_to_read);
+			syscall(__NR_close, mem_fd);
+			FAIL() << "unable to write to file\n";
+		}
+	}
+	syscall(__NR_close, fd_to_read);
+
+	/* We need to use `SIGCHLD` otherwise the parent won't receive any signal
+	 * when the child terminates.
+	 */
+	clone_args cl_args = {};
+	cl_args.exit_signal = SIGCHLD;
+	pid_t ret_pid = syscall(__NR_clone3, &cl_args, sizeof(cl_args));
+
+	if(ret_pid == 0)
+	{
+		char pathname[200];
+		snprintf(pathname, sizeof(pathname), "/proc/%d/fd/%d", getpid(), mem_fd);
+		const char *newargv[] = {pathname, "[OUTPUT] SyscallExit.execveX_success_memfd", NULL};
+		const char *newenviron[] = {"IN_TEST=yes", "3_ARGUMENT=yes", "2_ARGUMENT=no", NULL};
+		syscall(__NR_execveat, 0, pathname, newargv, newenviron, 0);
+		exit(EXIT_FAILURE);
+	}
+	syscall(__NR_close, mem_fd);
+
+	assert_syscall_state(SYSCALL_SUCCESS, "clone3", ret_pid, NOT_EQUAL, -1);
+
+	/* Catch the child before doing anything else. */
+	int status = 0;
+	int options = 0;
+	assert_syscall_state(SYSCALL_SUCCESS, "wait4", syscall(__NR_wait4, ret_pid, &status, options, NULL), NOT_EQUAL,
+			     -1);
+
+	if(__WEXITSTATUS(status) == EXIT_FAILURE || __WIFSIGNALED(status) != 0)
+	{
+		FAIL() << "The child execve failed." << std::endl;
+	}
+
+	/*=============================== TRIGGER SYSCALL ===========================*/
+
+	evt_test->disable_capture();
+
+#if defined(__s390x__) || defined(__riscv) || defined(__powerpc64__)
+	/* We search for a child event. */
+	evt_test->assert_event_presence(ret_pid);
+
+	if(HasFatalFailure())
+	{
+		return;
+	}
+
+	evt_test->parse_event();
+
+	evt_test->assert_header();
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	/* Please note here we cannot assert all the params, we check only the possible ones. */
+
+	/* Parameter 1: res (type: PT_ERRNO)*/
+	evt_test->assert_numeric_param(1, (int64_t)0);
+
+	/* PPM_EXE_WRITABLE is set when the user that executed a process can also write to the executable
+	 * file that is used to spawn it or is its owner or otherwise capable.
+	 */
+	evt_test->assert_numeric_param(20, (uint32_t)PPM_EXE_WRITABLE | PPM_EXE_FROM_MEMFD);
+
+	/* Parameter 28: trusted_exepath (type: PT_FSPATH) */
+	/* In the kmod, we use the "d_path" helper while in BPF we reconstruct the path
+	 * by hand so the result is a little bit different.
+	 * Please note that in the kernel module, we remove the " (deleted)" suffix while
+	 * in BPF we don't add it at all.
+	 */
+	if(evt_test->is_kmod_engine())
+	{
+		evt_test->assert_charbuf_param(28, "/memfd:malware");
+	}
+	else
+	{
+		/* In BPF drivers we don't have the correct result but we can reconstruct part of it */
+		evt_test->assert_charbuf_param(28, "memfd:malware");
+	}
+
+	/*=============================== ASSERT PARAMETERS  ===========================*/
+
+	evt_test->assert_num_params_pushed(28);
+#else
+	/* We search for a child event. */
+	evt_test->assert_event_absence(ret_pid);
+#endif
+}
+#endif
 #endif

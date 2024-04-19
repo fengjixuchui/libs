@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,29 +16,29 @@ int BPF_PROG(nanosleep_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, NANOSLEEP_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, NANOSLEEP_E_SIZE, PPME_SYSCALL_NANOSLEEP_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_NANOSLEEP_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: req (type: PT_RELTIME) */
-	u64 nanosec = 0;
+	uint64_t nanosec = 0;
 	unsigned long ts_pointer = extract__syscall_argument(regs, 0);
 	if(bpf_core_type_exists(struct __kernel_timespec))
 	{
 		struct __kernel_timespec ts = {0};
 		bpf_probe_read_user(&ts, bpf_core_type_size(struct __kernel_timespec), (void *)ts_pointer);
-		nanosec = ((u64)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
+		nanosec = ((uint64_t)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
 	}
 	else
 	{
 		struct modern_bpf__kernel_timespec ts = {0};
 		bpf_probe_read_user(&ts, sizeof(ts), (void *)ts_pointer);
-		nanosec = ((u64)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
+		nanosec = ((uint64_t)ts.tv_sec) * SECOND_TO_NS + ts.tv_nsec;
 	}
 	ringbuf__store_u64(&ringbuf, nanosec);
 
@@ -58,12 +59,12 @@ int BPF_PROG(nanosleep_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, NANOSLEEP_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, NANOSLEEP_X_SIZE, PPME_SYSCALL_NANOSLEEP_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_NANOSLEEP_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

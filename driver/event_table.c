@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
 Copyright (C) 2023 The Falco Authors.
@@ -11,41 +12,43 @@ or GPL2.txt for full copies of the license.
  * - Enter and exit events should have the same flags unless the exit one is `EC_UNKNOWN`.
  *
  * - The `ppm_event_category` is composed of 2 parts:
- * 	
+ *
  *    1. The highest bits represent the event category:
  *  	- `EC_SYSCALL`
  *   	- `EC_TRACEPOINT
  *   	- `EC_PLUGIN`
  *   	- `EC_METAEVENT`
- * 
+ *
  *    2. The lowest bits represent the syscall category to which the specific event belongs.
- * 
- *   All events must have only one syscall category and one event category. Exception: events 
+ *
+ *   All events must have only one syscall category and one event category. Exception: events
  *   marked with `EC_UNKNOWN` flag must only have the syscall category equal to `EC_UNKNOWN`.
- * 
+ *
  * - All events that are no more sent by our drivers must have the `EF_OLD_VERSION` flag.
- * 
+ *
  * - Events marked with `EC_UNKNOWN` must have a name equal to `NA`.
- * 
+ *
  * - All events that have the "EF_USES_FD" flag should return as first parameter a file descriptor.
- *	 "libsinsp" will try to access the first parameter and use it as a file descriptor. If the event has 
- *	 0 parameters but has the "EF_USES_FD" flag then a runtime error will occur shutting down the process. 
- *   Furthermore if an exit event has the "EF_USES_FD" then also the related enter event must have 
- *   it (following the logic described above). Otherwise the exit event will not trigger "libsinsp" code 
+ *	 "libsinsp" will try to access the first parameter and use it as a file descriptor. If the event has
+ *	 0 parameters but has the "EF_USES_FD" flag then a runtime error will occur shutting down the process.
+ *   Furthermore if an exit event has the "EF_USES_FD" then also the related enter event must have
+ *   it (following the logic described above). Otherwise the exit event will not trigger "libsinsp" code
  *   in order to properly manage the file descriptor returned by the exit event.
- * 
+ *
  * - The only kind of change permitted for pre-existent events is adding parameters. If you need to modify or
  *   remove some existing parameters you must create a new event pair. The new enum name should be equal to the previous one
  *   but with the version bumped by 1.
- * 	 Consider the `PPME_SYSCALL_EXECVE_19_E` event as an example, if you want to create a new version for it, the new enum 
- *   will be called `PPME_SYSCALL_EXECVE_20_E`. 
- * 
- * - All the versions of the same event must have the same name 
+ * 	 Consider the `PPME_SYSCALL_EXECVE_19_E` event as an example, if you want to create a new version for it, the new enum
+ *   will be called `PPME_SYSCALL_EXECVE_20_E`.
+ *
+ * - All the versions of the same event must have the same name
  */
 
 
 #include "ppm_events_public.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 const struct ppm_event_info g_event_info[] = {
 	[PPME_GENERIC_E] = {"syscall", EC_OTHER | EC_SYSCALL, EF_NONE, 2, {{"ID", PT_SYSCALLID, PF_DEC}, {"nativeID", PT_UINT16, PF_DEC} } },
 	[PPME_GENERIC_X] = {"syscall", EC_OTHER | EC_SYSCALL, EF_NONE, 1, {{"ID", PT_SYSCALLID, PF_DEC} } },
@@ -70,8 +73,8 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SOCKET_BIND_E] = {"bind", EC_NET | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 1, {{"fd", PT_FD, PF_DEC} } },
 	[PPME_SOCKET_BIND_X] = {"bind", EC_NET | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 2, {{"res", PT_ERRNO, PF_DEC}, {"addr", PT_SOCKADDR, PF_NA} } },
 	[PPME_SOCKET_CONNECT_E] = {"connect", EC_NET | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 2, {{"fd", PT_FD, PF_DEC}, {"addr", PT_SOCKADDR, PF_NA} } },
-	[PPME_SOCKET_CONNECT_X] = {"connect", EC_NET | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 2, {{"res", PT_ERRNO, PF_DEC}, {"tuple", PT_SOCKTUPLE, PF_NA} } },
-	[PPME_SOCKET_LISTEN_E] = {"listen", EC_NET | EC_SYSCALL, EF_USES_FD, 2, {{"fd", PT_FD, PF_DEC}, {"backlog", PT_UINT32, PF_DEC} } },
+	[PPME_SOCKET_CONNECT_X] = {"connect", EC_NET | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 3, {{"res", PT_ERRNO, PF_DEC}, {"tuple", PT_SOCKTUPLE, PF_NA}, {"fd", PT_FD, PF_DEC } } },
+	[PPME_SOCKET_LISTEN_E] = {"listen", EC_NET | EC_SYSCALL, EF_USES_FD, 2, {{"fd", PT_FD, PF_DEC}, {"backlog", PT_INT32, PF_DEC} } },
 	[PPME_SOCKET_LISTEN_X] = {"listen", EC_NET | EC_SYSCALL, EF_USES_FD, 1, {{"res", PT_ERRNO, PF_DEC} } },
 	[PPME_SOCKET_ACCEPT_E] = {"accept", EC_NET | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE | EF_OLD_VERSION, 0},
 	[PPME_SOCKET_ACCEPT_X] = {"accept", EC_NET | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE | EF_OLD_VERSION, 3, {{"fd", PT_FD, PF_DEC}, {"tuple", PT_SOCKTUPLE, PF_NA}, {"queuepct", PT_UINT8, PF_DEC} } },
@@ -100,7 +103,7 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SOCKET_SENDMMSG_E] = {"sendmmsg", EC_IO_WRITE | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SOCKET_SENDMMSG_X] = {"sendmmsg", EC_IO_WRITE | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SOCKET_RECVMSG_E] = {"recvmsg", EC_IO_READ | EC_SYSCALL, EF_USES_FD | EF_READS_FROM_FD | EF_MODIFIES_STATE, 1, {{"fd", PT_FD, PF_DEC} } },
-	[PPME_SOCKET_RECVMSG_X] = {"recvmsg", EC_IO_READ | EC_SYSCALL, EF_USES_FD | EF_READS_FROM_FD | EF_MODIFIES_STATE, 4, {{"res", PT_ERRNO, PF_DEC}, {"size", PT_UINT32, PF_DEC}, {"data", PT_BYTEBUF, PF_NA}, {"tuple", PT_SOCKTUPLE, PF_NA} } },
+	[PPME_SOCKET_RECVMSG_X] = {"recvmsg", EC_IO_READ | EC_SYSCALL, EF_USES_FD | EF_READS_FROM_FD | EF_MODIFIES_STATE, 5, {{"res", PT_ERRNO, PF_DEC}, {"size", PT_UINT32, PF_DEC}, {"data", PT_BYTEBUF, PF_NA}, {"tuple", PT_SOCKTUPLE, PF_NA}, {"msgcontrol", PT_BYTEBUF, PF_NA} } },
 	[PPME_SOCKET_RECVMMSG_E] = {"recvmmsg", EC_IO_READ | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SOCKET_RECVMMSG_X] = {"recvmmsg", EC_IO_READ | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SOCKET_ACCEPT4_E] = {"accept", EC_NET | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE | EF_OLD_VERSION, 1, {{"flags", PT_INT32, PF_HEX} } },
@@ -109,7 +112,7 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_CREAT_X] = {"creat", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 5, {{"fd", PT_FD, PF_DEC}, {"name", PT_FSPATH, PF_NA}, {"mode", PT_UINT32, PF_OCT}, {"dev", PT_UINT32, PF_HEX}, {"ino", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_PIPE_E] = {"pipe", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 0},
 	[PPME_SYSCALL_PIPE_X] = {"pipe", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 4, {{"res", PT_ERRNO, PF_DEC}, {"fd1", PT_FD, PF_DEC}, {"fd2", PT_FD, PF_DEC}, {"ino", PT_UINT64, PF_DEC} } },
-	[PPME_SYSCALL_EVENTFD_E] = {"eventfd", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"initval", PT_UINT64, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX} } },
+	[PPME_SYSCALL_EVENTFD_E] = {"eventfd", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"initval", PT_UINT64, PF_DEC}, {"flags", PT_UINT32, PF_HEX} } },
 	[PPME_SYSCALL_EVENTFD_X] = {"eventfd", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, {{"res", PT_FD, PF_DEC} } },
 	[PPME_SYSCALL_FUTEX_E] = {"futex", EC_IPC | EC_SYSCALL, EF_NONE, 3, {{"addr", PT_UINT64, PF_HEX}, {"op", PT_ENUMFLAGS16, PF_HEX, futex_operations}, {"val", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_FUTEX_X] = {"futex", EC_IPC | EC_SYSCALL, EF_NONE, 1, {{"res", PT_ERRNO, PF_DEC} } },
@@ -175,7 +178,7 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_PWRITEV_X] = {"pwritev", EC_IO_WRITE | EC_SYSCALL, EF_USES_FD | EF_WRITES_TO_FD, 2, {{"res", PT_ERRNO, PF_DEC}, {"data", PT_BYTEBUF, PF_NA} } },
 	[PPME_SYSCALL_DUP_E] = {"dup", EC_IO_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_USES_FD | EF_MODIFIES_STATE | EF_OLD_VERSION, 1, {{"fd", PT_FD, PF_DEC} } },
 	[PPME_SYSCALL_DUP_X] = {"dup", EC_IO_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_USES_FD | EF_MODIFIES_STATE | EF_OLD_VERSION, 1, {{"res", PT_FD, PF_DEC} } },
-	[PPME_SYSCALL_SIGNALFD_E] = {"signalfd", EC_SIGNAL | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 3, {{"fd", PT_FD, PF_DEC}, {"mask", PT_UINT32, PF_HEX}, {"flags", PT_FLAGS8, PF_HEX} } },
+	[PPME_SYSCALL_SIGNALFD_E] = {"signalfd", EC_SIGNAL | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 3, {{"fd", PT_FD, PF_DEC}, {"mask", PT_UINT32, PF_HEX}, {"flags", PT_UINT8, PF_HEX} } },
 	[PPME_SYSCALL_SIGNALFD_X] = {"signalfd", EC_SIGNAL | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, {{"res", PT_FD, PF_DEC} } },
 	[PPME_SYSCALL_KILL_E] = {"kill", EC_SIGNAL | EC_SYSCALL, EF_NONE, 2, {{"pid", PT_PID, PF_DEC}, {"sig", PT_SIGTYPE, PF_DEC} } },
 	[PPME_SYSCALL_KILL_X] = {"kill", EC_SIGNAL | EC_SYSCALL, EF_NONE, 1, {{"res", PT_ERRNO, PF_DEC} } },
@@ -185,22 +188,22 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_TGKILL_X] = {"tgkill", EC_SIGNAL | EC_SYSCALL, EF_NONE, 1, {{"res", PT_ERRNO, PF_DEC} } },
 	[PPME_SYSCALL_NANOSLEEP_E] = {"nanosleep", EC_SLEEP | EC_SYSCALL, EF_WAITS, 1, {{"interval", PT_RELTIME, PF_DEC} } },
 	[PPME_SYSCALL_NANOSLEEP_X] = {"nanosleep", EC_SLEEP | EC_SYSCALL, EF_WAITS, 1, {{"res", PT_ERRNO, PF_DEC} } },
-	[PPME_SYSCALL_TIMERFD_CREATE_E] = {"timerfd_create", EC_TIME | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"clockid", PT_UINT8, PF_DEC}, {"flags", PT_FLAGS8, PF_HEX} } },
+	[PPME_SYSCALL_TIMERFD_CREATE_E] = {"timerfd_create", EC_TIME | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"clockid", PT_UINT8, PF_DEC}, {"flags", PT_UINT8, PF_HEX} } },
 	[PPME_SYSCALL_TIMERFD_CREATE_X] = {"timerfd_create", EC_TIME | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, {{"res", PT_FD, PF_DEC} } },
-	[PPME_SYSCALL_INOTIFY_INIT_E] = {"inotify_init", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, {{"flags", PT_FLAGS8, PF_HEX} } },
+	[PPME_SYSCALL_INOTIFY_INIT_E] = {"inotify_init", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, {{"flags", PT_UINT8, PF_HEX} } },
 	[PPME_SYSCALL_INOTIFY_INIT_X] = {"inotify_init", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, {{"res", PT_FD, PF_DEC} } },
 	[PPME_SYSCALL_GETRLIMIT_E] = {"getrlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 1, {{"resource", PT_ENUMFLAGS8, PF_DEC, rlimit_resources} } },
 	[PPME_SYSCALL_GETRLIMIT_X] = {"getrlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 3, {{"res", PT_ERRNO, PF_DEC}, {"cur", PT_INT64, PF_DEC}, {"max", PT_INT64, PF_DEC} } },
 	[PPME_SYSCALL_SETRLIMIT_E] = {"setrlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 1, {{"resource", PT_ENUMFLAGS8, PF_DEC, rlimit_resources} } },
-	[PPME_SYSCALL_SETRLIMIT_X] = {"setrlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 3, {{"res", PT_ERRNO, PF_DEC}, {"cur", PT_INT64, PF_DEC}, {"max", PT_INT64, PF_DEC} } },
+	[PPME_SYSCALL_SETRLIMIT_X] = {"setrlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 4, {{"res", PT_ERRNO, PF_DEC},{"cur", PT_INT64, PF_DEC}, {"max", PT_INT64, PF_DEC}, {"resource", PT_ENUMFLAGS8, PF_DEC, rlimit_resources} } },
 	[PPME_SYSCALL_PRLIMIT_E] = {"prlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 2, {{"pid", PT_PID, PF_DEC}, {"resource", PT_ENUMFLAGS8, PF_DEC, rlimit_resources} } },
-	[PPME_SYSCALL_PRLIMIT_X] = {"prlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 5, {{"res", PT_ERRNO, PF_DEC}, {"newcur", PT_INT64, PF_DEC}, {"newmax", PT_INT64, PF_DEC}, {"oldcur", PT_INT64, PF_DEC}, {"oldmax", PT_INT64, PF_DEC} } },
+	[PPME_SYSCALL_PRLIMIT_X] = {"prlimit", EC_PROCESS | EC_SYSCALL, EF_NONE, 7, {{"res", PT_ERRNO, PF_DEC}, {"newcur", PT_INT64, PF_DEC}, {"newmax", PT_INT64, PF_DEC}, {"oldcur", PT_INT64, PF_DEC}, {"oldmax", PT_INT64, PF_DEC}, {"pid", PT_INT64, PF_DEC}, {"resource", PT_ENUMFLAGS8, PF_DEC, rlimit_resources} } },
 	[PPME_SCHEDSWITCH_1_E] = {"switch", EC_SCHEDULER | EC_TRACEPOINT, EF_SKIPPARSERESET | EF_OLD_VERSION, 1, {{"next", PT_PID, PF_DEC} } },
 	[PPME_SCHEDSWITCH_1_X] = {"NA", EC_UNKNOWN, EF_SKIPPARSERESET | EF_UNUSED | EF_OLD_VERSION, 0},
 	[PPME_DROP_E] = {"drop", EC_INTERNAL | EC_METAEVENT, EF_SKIPPARSERESET, 1, {{"ratio", PT_UINT32, PF_DEC} } },
 	[PPME_DROP_X] = {"drop", EC_INTERNAL | EC_METAEVENT, EF_SKIPPARSERESET, 1, {{"ratio", PT_UINT32, PF_DEC} } },
 	[PPME_SYSCALL_FCNTL_E] = {"fcntl", EC_IO_OTHER | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 2, {{"fd", PT_FD, PF_DEC}, {"cmd", PT_ENUMFLAGS8, PF_DEC, fcntl_commands} } },
-	[PPME_SYSCALL_FCNTL_X] = {"fcntl", EC_IO_OTHER | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 1, {{"res", PT_FD, PF_DEC} } },
+	[PPME_SYSCALL_FCNTL_X] = {"fcntl", EC_IO_OTHER | EC_SYSCALL, EF_USES_FD | EF_MODIFIES_STATE, 3, {{"res", PT_FD, PF_DEC}, {"fd", PT_FD, PF_DEC}, {"cmd", PT_ENUMFLAGS8, PF_DEC, fcntl_commands} } },
 	[PPME_SCHEDSWITCH_6_E] = {"switch", EC_SCHEDULER | EC_TRACEPOINT, EF_NONE, 6, {{"next", PT_PID, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC} } }, /// TODO: do we need SKIPPARSERESET flag?
 	[PPME_SCHEDSWITCH_6_X] = {"NA", EC_UNKNOWN, EF_UNUSED, 0},
 	[PPME_SYSCALL_EXECVE_13_E] = {"execve", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE | EF_OLD_VERSION, 0},
@@ -235,7 +238,7 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_FORK_X] = {"fork", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE | EF_OLD_VERSION, 16, {{"res", PT_PID, PF_DEC}, {"exe", PT_CHARBUF, PF_NA}, {"args", PT_BYTEBUF, PF_NA}, {"tid", PT_PID, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"ptid", PT_PID, PF_DEC}, {"cwd", PT_CHARBUF, PF_NA}, {"fdlimit", PT_INT64, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, clone_flags}, {"uid", PT_UINT32, PF_DEC}, {"gid", PT_UINT32, PF_DEC} } },
 	[PPME_SYSCALL_VFORK_E] = {"vfork", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE | EF_OLD_VERSION, 0},
 	[PPME_SYSCALL_VFORK_X] = {"vfork", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE | EF_OLD_VERSION, 16, {{"res", PT_PID, PF_DEC}, {"exe", PT_CHARBUF, PF_NA}, {"args", PT_BYTEBUF, PF_NA}, {"tid", PT_PID, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"ptid", PT_PID, PF_DEC}, {"cwd", PT_CHARBUF, PF_NA}, {"fdlimit", PT_INT64, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, clone_flags}, {"uid", PT_UINT32, PF_DEC}, {"gid", PT_UINT32, PF_DEC} } },
-	[PPME_PROCEXIT_1_E] = {"procexit", EC_PROCESS | EC_TRACEPOINT, EF_MODIFIES_STATE, 4, {{"status", PT_ERRNO, PF_DEC}, {"ret", PT_ERRNO, PF_DEC}, {"sig", PT_SIGTYPE, PF_DEC}, {"core", PT_UINT8, PF_DEC} } },
+	[PPME_PROCEXIT_1_E] = {"procexit", EC_PROCESS | EC_TRACEPOINT, EF_MODIFIES_STATE, 5, {{"status", PT_ERRNO, PF_DEC}, {"ret", PT_ERRNO, PF_DEC}, {"sig", PT_SIGTYPE, PF_DEC}, {"core", PT_UINT8, PF_DEC}, {"reaper_tid", PT_PID, PF_DEC} } },
 	[PPME_PROCEXIT_1_X] = {"NA", EC_UNKNOWN, EF_UNUSED, 0},
 	[PPME_SYSCALL_SENDFILE_E] = {"sendfile", EC_IO_WRITE | EC_SYSCALL, EF_USES_FD, 4, {{"out_fd", PT_FD, PF_DEC}, {"in_fd", PT_FD, PF_DEC}, {"offset", PT_UINT64, PF_DEC}, {"size", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_SENDFILE_X] = {"sendfile", EC_IO_WRITE | EC_SYSCALL, EF_USES_FD, 2, {{"res", PT_ERRNO, PF_DEC}, {"offset", PT_UINT64, PF_DEC} } },
@@ -342,12 +345,12 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_PAGE_FAULT_E] = {"page_fault", EC_OTHER | EC_TRACEPOINT, EF_SKIPPARSERESET, 3, {{"addr", PT_UINT64, PF_HEX}, {"ip", PT_UINT64, PF_HEX}, {"error", PT_FLAGS32, PF_HEX, pf_flags} } },
 	[PPME_PAGE_FAULT_X] = {"NA", EC_UNKNOWN, EF_UNUSED, 0},
 	[PPME_SYSCALL_EXECVE_19_E] = {"execve", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 1, {{"filename", PT_FSPATH, PF_NA} } },
-	[PPME_SYSCALL_EXECVE_19_X] = {"execve", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 27, {{"res", PT_ERRNO, PF_DEC}, {"exe", PT_CHARBUF, PF_NA}, {"args", PT_BYTEBUF, PF_NA}, {"tid", PT_PID, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"ptid", PT_PID, PF_DEC}, {"cwd", PT_CHARBUF, PF_NA}, {"fdlimit", PT_UINT64, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC}, {"comm", PT_CHARBUF, PF_NA}, {"cgroups", PT_BYTEBUF, PF_NA}, {"env", PT_BYTEBUF, PF_NA}, {"tty", PT_INT32, PF_DEC}, {"pgid", PT_PID, PF_DEC}, {"loginuid", PT_INT32, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, execve_flags}, {"cap_inheritable", PT_UINT64, PF_HEX}, {"cap_permitted", PT_UINT64, PF_HEX}, {"cap_effective", PT_UINT64, PF_HEX}, {"exe_ino", PT_UINT64, PF_DEC}, {"exe_ino_ctime", PT_ABSTIME, PF_DEC}, {"exe_ino_mtime", PT_ABSTIME, PF_DEC}, {"uid", PT_INT32, PF_DEC} } },
+	[PPME_SYSCALL_EXECVE_19_X] = {"execve", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 28, {{"res", PT_ERRNO, PF_DEC}, {"exe", PT_CHARBUF, PF_NA}, {"args", PT_BYTEBUF, PF_NA}, {"tid", PT_PID, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"ptid", PT_PID, PF_DEC}, {"cwd", PT_CHARBUF, PF_NA}, {"fdlimit", PT_UINT64, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC}, {"comm", PT_CHARBUF, PF_NA}, {"cgroups", PT_BYTEBUF, PF_NA}, {"env", PT_BYTEBUF, PF_NA}, {"tty", PT_UINT32, PF_DEC}, {"pgid", PT_PID, PF_DEC}, {"loginuid", PT_UID, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, execve_flags}, {"cap_inheritable", PT_UINT64, PF_HEX}, {"cap_permitted", PT_UINT64, PF_HEX}, {"cap_effective", PT_UINT64, PF_HEX}, {"exe_ino", PT_UINT64, PF_DEC}, {"exe_ino_ctime", PT_ABSTIME, PF_DEC}, {"exe_ino_mtime", PT_ABSTIME, PF_DEC}, {"uid", PT_UID, PF_DEC}, {"trusted_exepath", PT_FSPATH, PF_NA} } },
 	[PPME_SYSCALL_SETPGID_E] = {"setpgid", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 2, {{"pid", PT_PID, PF_DEC}, {"pgid", PT_PID, PF_DEC} } },
 	[PPME_SYSCALL_SETPGID_X] = {"setpgid", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 1, {{"res", PT_PID, PF_DEC} } },
 	[PPME_SYSCALL_BPF_E] = {"bpf", EC_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_OLD_VERSION, 1, {{"cmd", PT_INT64, PF_DEC} } },
-	[PPME_SYSCALL_BPF_X] = {"bpf", EC_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_OLD_VERSION, 1, {{"res_or_fd", PT_DYN, PF_DEC, bpf_dynamic_param, PPM_BPF_IDX_MAX} } },
-	[PPME_SYSCALL_SECCOMP_E] = {"seccomp", EC_OTHER | EC_SYSCALL, EF_NONE, 1, {{"op", PT_UINT64, PF_DEC}, {"flags", PT_UINT64, PF_HEX} } },
+	[PPME_SYSCALL_BPF_X] = {"bpf", EC_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_OLD_VERSION, 1, {{"res_or_fd", PT_DYN, PF_DEC, bpf_dynamic_param, PPM_BPF_IDX_MAX}} },
+	[PPME_SYSCALL_SECCOMP_E] = {"seccomp", EC_OTHER | EC_SYSCALL, EF_NONE, 2, {{"op", PT_UINT64, PF_DEC}, {"flags", PT_UINT64, PF_HEX} } },
 	[PPME_SYSCALL_SECCOMP_X] = {"seccomp", EC_OTHER | EC_SYSCALL, EF_NONE, 1, {{"res", PT_ERRNO, PF_DEC} } },
 	[PPME_SYSCALL_UNLINK_2_E] = {"unlink", EC_FILE | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SYSCALL_UNLINK_2_X] = {"unlink", EC_FILE | EC_SYSCALL, EF_NONE, 2, {{"res", PT_ERRNO, PF_DEC}, {"path", PT_FSPATH, PF_NA} } },
@@ -366,27 +369,27 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_CHMOD_E] = {"chmod", EC_FILE | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SYSCALL_CHMOD_X] = {"chmod", EC_FILE | EC_SYSCALL, EF_NONE, 3, {{"res", PT_ERRNO, PF_DEC}, {"filename", PT_FSPATH, PF_NA}, {"mode", PT_MODE, PF_OCT, chmod_mode} } },
 	[PPME_SYSCALL_FCHMOD_E] = {"fchmod", EC_FILE | EC_SYSCALL, EF_NONE, 0},
-	[PPME_SYSCALL_FCHMOD_X] = {"fchmod", EC_FILE | EC_SYSCALL, EF_NONE, 3, {{"res", PT_ERRNO, PF_DEC}, {"fd", PT_FD, PF_DEC}, {"mode", PT_MODE, PF_OCT, chmod_mode} } },
+	[PPME_SYSCALL_FCHMOD_X] = {"fchmod", EC_FILE | EC_SYSCALL, EF_USES_FD, 3, {{"res", PT_ERRNO, PF_DEC}, {"fd", PT_FD, PF_DEC}, {"mode", PT_MODE, PF_OCT, chmod_mode} } },
 	[PPME_SYSCALL_RENAMEAT2_E] = {"renameat2", EC_FILE | EC_SYSCALL, EF_NONE, 0 },
 	[PPME_SYSCALL_RENAMEAT2_X] = {"renameat2", EC_FILE | EC_SYSCALL, EF_NONE, 6, {{"res", PT_ERRNO, PF_DEC}, {"olddirfd", PT_FD, PF_DEC}, {"oldpath", PT_FSRELPATH, PF_NA, DIRFD_PARAM(1)}, {"newdirfd", PT_FD, PF_DEC}, {"newpath", PT_FSRELPATH, PF_NA, DIRFD_PARAM(3)}, {"flags", PT_FLAGS32, PF_HEX, renameat2_flags} } },
 	[PPME_SYSCALL_USERFAULTFD_E] = {"userfaultfd", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 0},
 	[PPME_SYSCALL_USERFAULTFD_X] = {"userfaultfd", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"res", PT_ERRNO, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, file_flags} } },
-	[PPME_PLUGINEVENT_E] = {"pluginevent", EC_OTHER | EC_PLUGIN, EF_LARGE_PAYLOAD, 2, {{"plugin ID", PT_UINT32, PF_DEC}, {"event_data", PT_BYTEBUF, PF_NA} } },
+	[PPME_PLUGINEVENT_E] = {"pluginevent", EC_OTHER | EC_PLUGIN, EF_LARGE_PAYLOAD, 2, {{"plugin_id", PT_UINT32, PF_DEC}, {"event_data", PT_BYTEBUF, PF_NA} } },
 	[PPME_PLUGINEVENT_X] = {"NA", EC_UNKNOWN, EF_UNUSED, 0},
 	[PPME_CONTAINER_JSON_2_E] = {"container", EC_PROCESS | EC_METAEVENT, EF_MODIFIES_STATE | EF_LARGE_PAYLOAD, 1, {{"json", PT_CHARBUF, PF_NA} } }, /// TODO: do we need SKIPPARSERESET flag?
 	[PPME_CONTAINER_JSON_2_X] = {"NA", EC_UNKNOWN, EF_UNUSED, 0},
 	[PPME_SYSCALL_OPENAT2_E] = {"openat2", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 5, {{"dirfd", PT_FD, PF_DEC}, {"name", PT_FSRELPATH, PF_NA, DIRFD_PARAM(1)}, {"flags", PT_FLAGS32, PF_HEX, file_flags}, {"mode", PT_UINT32, PF_OCT}, {"resolve", PT_FLAGS32, PF_HEX, openat2_flags} } },
-	[PPME_SYSCALL_OPENAT2_X] = {"openat2", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 6, {{"fd", PT_FD, PF_DEC}, {"dirfd", PT_FD, PF_DEC}, {"name", PT_FSRELPATH, PF_NA, DIRFD_PARAM(1)}, {"flags", PT_FLAGS32, PF_HEX, file_flags}, {"mode", PT_UINT32, PF_OCT}, {"resolve", PT_FLAGS32, PF_HEX, openat2_flags} } },
+	[PPME_SYSCALL_OPENAT2_X] = {"openat2", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 8, {{"fd", PT_FD, PF_DEC}, {"dirfd", PT_FD, PF_DEC}, {"name", PT_FSRELPATH, PF_NA, DIRFD_PARAM(1)}, {"flags", PT_FLAGS32, PF_HEX, file_flags}, {"mode", PT_UINT32, PF_OCT}, {"resolve", PT_FLAGS32, PF_HEX, openat2_flags}, {"dev", PT_UINT32, PF_HEX}, {"ino", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_MPROTECT_E] = {"mprotect", EC_MEMORY | EC_SYSCALL, EF_NONE, 3, {{"addr", PT_UINT64, PF_HEX}, {"length", PT_UINT64, PF_DEC}, {"prot", PT_FLAGS32, PF_HEX, prot_flags} } },
 	[PPME_SYSCALL_MPROTECT_X] = {"mprotect", EC_MEMORY | EC_SYSCALL, EF_NONE, 1, {{"res", PT_ERRNO, PF_DEC} } },
 	[PPME_SYSCALL_EXECVEAT_E] = {"execveat", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 3, {{"dirfd", PT_FD, PF_DEC}, {"pathname", PT_FSRELPATH, PF_NA, DIRFD_PARAM(0)}, {"flags", PT_FLAGS32, PF_HEX, execveat_flags} } },
-	[PPME_SYSCALL_EXECVEAT_X] = {"execveat", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 27, {{"res", PT_ERRNO, PF_DEC}, {"exe", PT_CHARBUF, PF_NA}, {"args", PT_BYTEBUF, PF_NA}, {"tid", PT_PID, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"ptid", PT_PID, PF_DEC}, {"cwd", PT_CHARBUF, PF_NA}, {"fdlimit", PT_UINT64, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC}, {"comm", PT_CHARBUF, PF_NA}, {"cgroups", PT_BYTEBUF, PF_NA}, {"env", PT_BYTEBUF, PF_NA}, {"tty", PT_INT32, PF_DEC}, {"pgid", PT_PID, PF_DEC}, {"loginuid", PT_INT32, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, execve_flags}, {"cap_inheritable", PT_UINT64, PF_HEX}, {"cap_permitted", PT_UINT64, PF_HEX}, {"cap_effective", PT_UINT64, PF_HEX}, {"exe_ino", PT_UINT64, PF_DEC}, {"exe_ino_ctime", PT_ABSTIME, PF_DEC}, {"exe_ino_mtime", PT_ABSTIME, PF_DEC}, {"uid", PT_INT32, PF_DEC} } },
+	[PPME_SYSCALL_EXECVEAT_X] = {"execveat", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 28, {{"res", PT_ERRNO, PF_DEC}, {"exe", PT_CHARBUF, PF_NA}, {"args", PT_BYTEBUF, PF_NA}, {"tid", PT_PID, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"ptid", PT_PID, PF_DEC}, {"cwd", PT_CHARBUF, PF_NA}, {"fdlimit", PT_UINT64, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC}, {"comm", PT_CHARBUF, PF_NA}, {"cgroups", PT_BYTEBUF, PF_NA}, {"env", PT_BYTEBUF, PF_NA}, {"tty", PT_UINT32, PF_DEC}, {"pgid", PT_PID, PF_DEC}, {"loginuid", PT_UID, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, execve_flags}, {"cap_inheritable", PT_UINT64, PF_HEX}, {"cap_permitted", PT_UINT64, PF_HEX}, {"cap_effective", PT_UINT64, PF_HEX}, {"exe_ino", PT_UINT64, PF_DEC}, {"exe_ino_ctime", PT_ABSTIME, PF_DEC}, {"exe_ino_mtime", PT_ABSTIME, PF_DEC}, {"uid", PT_UID, PF_DEC}, {"trusted_exepath", PT_FSPATH, PF_NA} } },
 	[PPME_SYSCALL_COPY_FILE_RANGE_E] = {"copy_file_range", EC_FILE | EC_SYSCALL, EF_USES_FD | EF_READS_FROM_FD | EF_WRITES_TO_FD, 3, {{"fdin", PT_FD, PF_DEC}, {"offin", PT_UINT64, PF_DEC}, {"len", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_COPY_FILE_RANGE_X] = {"copy_file_range", EC_FILE | EC_SYSCALL, EF_USES_FD | EF_READS_FROM_FD | EF_WRITES_TO_FD, 3, {{"res", PT_ERRNO, PF_DEC}, {"fdout", PT_FD, PF_DEC}, {"offout", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_CLONE3_E] = {"clone3", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 0},
 	[PPME_SYSCALL_CLONE3_X] = {"clone3", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 21, {{"res", PT_PID, PF_DEC}, {"exe", PT_CHARBUF, PF_NA}, {"args", PT_BYTEBUF, PF_NA}, {"tid", PT_PID, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"ptid", PT_PID, PF_DEC}, {"cwd", PT_CHARBUF, PF_NA}, {"fdlimit", PT_INT64, PF_DEC}, {"pgft_maj", PT_UINT64, PF_DEC}, {"pgft_min", PT_UINT64, PF_DEC}, {"vm_size", PT_UINT32, PF_DEC}, {"vm_rss", PT_UINT32, PF_DEC}, {"vm_swap", PT_UINT32, PF_DEC}, {"comm", PT_CHARBUF, PF_NA}, {"cgroups", PT_BYTEBUF, PF_NA}, {"flags", PT_FLAGS32, PF_HEX, clone_flags}, {"uid", PT_UINT32, PF_DEC}, {"gid", PT_UINT32, PF_DEC}, {"vtid", PT_PID, PF_DEC}, {"vpid", PT_PID, PF_DEC}, {"pidns_init_start_ts", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_OPEN_BY_HANDLE_AT_E] = {"open_by_handle_at", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 0},
-	[PPME_SYSCALL_OPEN_BY_HANDLE_AT_X] = {"open_by_handle_at", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 4, {{"fd", PT_FD, PF_DEC}, {"mountfd", PT_FD, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, file_flags}, {"path", PT_FSPATH, PF_NA} } },
+	[PPME_SYSCALL_OPEN_BY_HANDLE_AT_X] = {"open_by_handle_at", EC_FILE | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 6, {{"fd", PT_FD, PF_DEC}, {"mountfd", PT_FD, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, file_flags}, {"path", PT_FSPATH, PF_NA}, {"dev", PT_UINT32, PF_HEX}, {"ino", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_IO_URING_SETUP_E] = {"io_uring_setup", EC_IO_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 0},
 	[PPME_SYSCALL_IO_URING_SETUP_X] = {"io_uring_setup", EC_IO_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 8, {{"res", PT_ERRNO, PF_DEC},  {"entries", PT_UINT32, PF_DEC}, {"sq_entries", PT_UINT32, PF_DEC},{"cq_entries", PT_UINT32, PF_DEC},{"flags", PT_FLAGS32, PF_HEX, io_uring_setup_flags},{"sq_thread_cpu", PT_UINT32, PF_DEC}, {"sq_thread_idle", PT_UINT32, PF_DEC},{"features", PT_FLAGS32, PF_HEX, io_uring_setup_feats}}},
 	[PPME_SYSCALL_IO_URING_ENTER_E] = {"io_uring_enter", EC_IO_OTHER | EC_SYSCALL, EF_NONE, 0},
@@ -418,9 +421,9 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_DUP_1_E] = {"dup", EC_IO_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_USES_FD | EF_MODIFIES_STATE, 1, {{"fd", PT_FD, PF_DEC} } },
 	[PPME_SYSCALL_DUP_1_X] = {"dup", EC_IO_OTHER | EC_SYSCALL, EF_CREATES_FD | EF_USES_FD | EF_MODIFIES_STATE, 2, {{"res", PT_FD, PF_DEC}, {"oldfd", PT_FD, PF_DEC} } },
 	[PPME_SYSCALL_BPF_2_E] = {"bpf", EC_OTHER | EC_SYSCALL, EF_CREATES_FD, 1, {{"cmd", PT_INT64, PF_DEC} } },
-	[PPME_SYSCALL_BPF_2_X] = {"bpf", EC_OTHER | EC_SYSCALL, EF_CREATES_FD, 1, { {"fd", PT_FD, PF_DEC} } },
+	[PPME_SYSCALL_BPF_2_X] = {"bpf", EC_OTHER | EC_SYSCALL, EF_CREATES_FD, 2, { {"fd", PT_FD, PF_DEC}, {"cmd", PT_ENUMFLAGS32, PF_DEC, bpf_commands} } },
 	[PPME_SYSCALL_MLOCK2_E] = {"mlock2", EC_MEMORY | EC_SYSCALL, EF_NONE, 0},
-	[PPME_SYSCALL_MLOCK2_X] = {"mlock2", EC_MEMORY | EC_SYSCALL, EF_NONE, 4, {{"res", PT_ERRNO, PF_DEC}, {"addr", PT_UINT64, PF_HEX}, {"len", PT_UINT64, PF_DEC}, {"flags", PT_UINT32, PF_HEX, mlock2_flags}}},
+	[PPME_SYSCALL_MLOCK2_X] = {"mlock2", EC_MEMORY | EC_SYSCALL, EF_NONE, 4, {{"res", PT_ERRNO, PF_DEC}, {"addr", PT_UINT64, PF_HEX}, {"len", PT_UINT64, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, mlock2_flags}}},
 	[PPME_SYSCALL_FSCONFIG_E] = {"fsconfig", EC_SYSTEM | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SYSCALL_FSCONFIG_X] = {"fsconfig", EC_SYSTEM | EC_SYSCALL, EF_USES_FD, 7, {{"res", PT_ERRNO, PF_DEC}, {"fd", PT_FD, PF_DEC}, {"cmd", PT_ENUMFLAGS32, PF_DEC, fsconfig_cmds}, {"key", PT_CHARBUF, PF_NA}, {"value_bytebuf", PT_BYTEBUF, PF_NA}, {"value_charbuf", PT_CHARBUF, PF_NA}, {"aux", PT_INT32, PF_DEC}}},
 	[PPME_SYSCALL_EPOLL_CREATE_E] = {"epoll_create", EC_WAIT | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, { {"size", PT_INT32, PF_DEC} } },
@@ -432,7 +435,7 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_LCHOWN_E] = {"lchown", EC_FILE | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SYSCALL_LCHOWN_X] = {"lchown", EC_FILE | EC_SYSCALL, EF_NONE, 4, {{"res", PT_ERRNO, PF_DEC}, {"path", PT_FSPATH, PF_NA}, {"uid", PT_UINT32, PF_DEC}, {"gid", PT_UINT32, PF_DEC} } },
 	[PPME_SYSCALL_FCHOWN_E] = {"fchown", EC_FILE | EC_SYSCALL, EF_NONE, 0},
-	[PPME_SYSCALL_FCHOWN_X] = {"fchown", EC_FILE | EC_SYSCALL, EF_NONE, 4, {{"res", PT_ERRNO, PF_DEC}, {"fd", PT_FD, PF_DEC}, {"uid", PT_UINT32, PF_DEC}, {"gid", PT_UINT32, PF_DEC} } },
+	[PPME_SYSCALL_FCHOWN_X] = {"fchown", EC_FILE | EC_SYSCALL, EF_USES_FD, 4, {{"res", PT_ERRNO, PF_DEC}, {"fd", PT_FD, PF_DEC}, {"uid", PT_UINT32, PF_DEC}, {"gid", PT_UINT32, PF_DEC} } },
 	[PPME_SYSCALL_FCHOWNAT_E] = {"fchownat", EC_FILE | EC_SYSCALL, EF_NONE, 0},
 	[PPME_SYSCALL_FCHOWNAT_X] = {"fchownat", EC_FILE | EC_SYSCALL, EF_NONE, 6, {{"res", PT_ERRNO, PF_DEC}, {"dirfd", PT_FD, PF_DEC}, {"pathname", PT_FSRELPATH, PF_NA, DIRFD_PARAM(1)}, {"uid", PT_UINT32, PF_DEC}, {"gid", PT_UINT32, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, fchownat_flags}} },
 	[PPME_SYSCALL_UMOUNT_1_E] = {"umount", EC_FILE | EC_SYSCALL, EF_MODIFIES_STATE, 0},
@@ -448,13 +451,43 @@ const struct ppm_event_info g_event_info[] = {
 	[PPME_SYSCALL_EVENTFD2_E] = {"eventfd2", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 1, {{"initval", PT_UINT64, PF_DEC} } },
 	[PPME_SYSCALL_EVENTFD2_X] = {"eventfd2", EC_IPC | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"res", PT_FD, PF_DEC}, {"flags", PT_FLAGS16, PF_HEX, file_flags} } },
 	[PPME_SYSCALL_SIGNALFD4_E] = {"signalfd4", EC_SIGNAL | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"fd", PT_FD, PF_DEC}, {"mask", PT_UINT32, PF_HEX}}},
-	[PPME_SYSCALL_SIGNALFD4_X] = {"signalfd4", EC_SIGNAL | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"res", PT_FD, PF_DEC},  {"flags", PT_FLAGS16, PF_HEX}}},
+	[PPME_SYSCALL_SIGNALFD4_X] = {"signalfd4", EC_SIGNAL | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 2, {{"res", PT_FD, PF_DEC},  {"flags", PT_FLAGS16, PF_HEX, file_flags}}},
 	[PPME_SYSCALL_PRCTL_E] = {"prctl", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 0 },
 	[PPME_SYSCALL_PRCTL_X] = {"prctl", EC_PROCESS | EC_SYSCALL, EF_MODIFIES_STATE, 4, {{"res", PT_ERRNO, PF_DEC}, {"option", PT_ENUMFLAGS32, PF_DEC, prctl_options}, {"arg2_str", PT_CHARBUF, PF_NA}, {"arg2_int", PT_INT64, PF_DEC} } },
+	[PPME_ASYNCEVENT_E] = {"asyncevent", EC_OTHER | EC_METAEVENT, EF_LARGE_PAYLOAD, 3, {{"plugin_id", PT_UINT32, PF_DEC}, {"name", PT_CHARBUF, PF_NA}, {"data", PT_BYTEBUF, PF_NA} } },
+	[PPME_ASYNCEVENT_X] = {"NA", EC_UNKNOWN, EF_UNUSED, 0},
+	[PPME_SYSCALL_MEMFD_CREATE_E] = {"memfd_create", EC_MEMORY | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 0},
+	[PPME_SYSCALL_MEMFD_CREATE_X] = {"memfd_create", EC_MEMORY | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 3, {{"fd", PT_FD, PF_DEC}, {"name", PT_CHARBUF, PF_NA}, {"flags", PT_FLAGS32, PF_HEX, memfd_create_flags} } },
+	[PPME_SYSCALL_PIDFD_GETFD_E] = {"pidfd_getfd", EC_PROCESS | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 0},
+	[PPME_SYSCALL_PIDFD_GETFD_X] = {"pidfd_getfd", EC_PROCESS | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 4, {{"fd", PT_FD, PF_DEC}, {"pid_fd", PT_FD, PF_DEC}, {"target_fd", PT_FD, PF_DEC}, {"flags", PT_UINT32, PF_HEX}}},
+	[PPME_SYSCALL_PIDFD_OPEN_E] = {"pidfd_open", EC_PROCESS | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 0},
+	[PPME_SYSCALL_PIDFD_OPEN_X] = {"pidfd_open", EC_PROCESS | EC_SYSCALL, EF_CREATES_FD | EF_MODIFIES_STATE, 3, {{"fd", PT_FD, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"flags", PT_FLAGS32, PF_HEX, pidfd_open_flags}}},
+	[PPME_SYSCALL_INIT_MODULE_E] = {"init_module", EC_OTHER | EC_SYSCALL, EF_NONE, 0},
+	[PPME_SYSCALL_INIT_MODULE_X] = {"init_module", EC_OTHER | EC_SYSCALL, EF_NONE, 4, {{"res", PT_ERRNO, PF_DEC}, {"img", PT_BYTEBUF, PF_NA}, {"length", PT_UINT64, PF_DEC}, {"uargs", PT_CHARBUF, PF_NA}}},
+	[PPME_SYSCALL_FINIT_MODULE_E] = {"finit_module", EC_OTHER | EC_SYSCALL, EF_NONE, 0},
+	[PPME_SYSCALL_FINIT_MODULE_X] = {"finit_module", EC_OTHER | EC_SYSCALL, EF_USES_FD | EF_READS_FROM_FD, 4, {{"res", PT_ERRNO, PF_DEC}, {"fd", PT_FD, PF_DEC}, {"uargs", PT_CHARBUF, PF_NA}, {"flags", PT_FLAGS32, PF_HEX, finit_module_flags}}},
+	[PPME_SYSCALL_MKNOD_E] = {"mknod", EC_OTHER | EC_SYSCALL, EF_NONE, 0},
+	[PPME_SYSCALL_MKNOD_X] = {"mknod", EC_OTHER | EC_SYSCALL, EF_NONE, 4, {{"res", PT_ERRNO, PF_DEC}, {"path", PT_FSPATH, PF_NA},{"mode", PT_MODE, PF_OCT, mknod_mode},{"dev", PT_UINT32, PF_DEC}}},
+ 	[PPME_SYSCALL_MKNODAT_E] = {"mknodat", EC_OTHER | EC_SYSCALL, EF_NONE, 0},
+	[PPME_SYSCALL_MKNODAT_X] = {"mknodat", EC_OTHER | EC_SYSCALL, EF_USES_FD, 5, {{"res", PT_ERRNO, PF_DEC}, {"dirfd", PT_FD, PF_DEC}, {"path", PT_FSRELPATH, PF_NA, DIRFD_PARAM(1)},{"mode", PT_MODE, PF_OCT, mknod_mode},{"dev", PT_UINT32, PF_DEC}}},
+	[PPME_SYSCALL_NEWFSTATAT_E] = {"newfstatat", EC_FILE | EC_SYSCALL, EF_NONE, 0},
+	[PPME_SYSCALL_NEWFSTATAT_X] = {"newfstatat", EC_FILE | EC_SYSCALL, EF_USES_FD, 4, {{"res", PT_ERRNO, PF_DEC}, {"dirfd", PT_FD, PF_DEC}, {"path", PT_FSRELPATH, PF_NA, DIRFD_PARAM(1)}, {"flags", PT_FLAGS32, PF_HEX, newfstatat_flags}}},
+	[PPME_SYSCALL_PROCESS_VM_READV_E] = {"process_vm_readv", EC_SYSCALL | EC_IPC, EF_NONE, 0},
+	[PPME_SYSCALL_PROCESS_VM_READV_X] = {"process_vm_readv", EC_SYSCALL | EC_IPC, EF_NONE, 3, {{"res", PT_INT64, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"data", PT_BYTEBUF, PF_NA}}},
+	[PPME_SYSCALL_PROCESS_VM_WRITEV_E] = {"process_vm_writev", EC_SYSCALL | EC_IPC, EF_NONE, 0},
+	[PPME_SYSCALL_PROCESS_VM_WRITEV_X] = {"process_vm_writev", EC_SYSCALL | EC_IPC, EF_NONE, 3, {{"res", PT_INT64, PF_DEC}, {"pid", PT_PID, PF_DEC}, {"data", PT_BYTEBUF, PF_NA}}},
+	[PPME_SYSCALL_DELETE_MODULE_E] = {"delete_module", EC_OTHER | EC_SYSCALL, EF_NONE, 0},
+	[PPME_SYSCALL_DELETE_MODULE_X] = {"delete_module", EC_OTHER | EC_SYSCALL, EF_NONE, 3, {{"res", PT_ERRNO, PF_DEC}, {"name", PT_CHARBUF, PF_NA}, {"flags", PT_FLAGS32, PF_HEX, delete_module_flags}}},
 };
+#pragma GCC diagnostic pop
 
+// We don't need this check in kmod (this source file is included during kmod compilation!)
+// This also avoids weird situation where the _Static_assert is not available in some very old compilers,
+// thus breaking the kmod build.
+#ifndef __KERNEL__
 // This code is compiled on windows and osx too!
 // Make sure to be on gcc or that the c standard is >= c11
 #if defined __GNUC__ || __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(g_event_info) / sizeof(*g_event_info) == PPM_EVENT_MAX, "Missing event entries in event table.");
+#endif
 #endif

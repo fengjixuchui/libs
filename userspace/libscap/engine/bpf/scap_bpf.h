@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +18,8 @@ limitations under the License.
 #ifndef _SCAP_BPF_H
 #define _SCAP_BPF_H
 
-#include "bpf.h"
-#include "../compat/perf_event.h"
+#include <libscap/compat/bpf.h>
+#include <libscap/compat/perf_event.h>
 
 struct perf_event_sample {
 	struct perf_event_header header;

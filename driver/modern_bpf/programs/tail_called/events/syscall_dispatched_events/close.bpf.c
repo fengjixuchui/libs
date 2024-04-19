@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -16,7 +17,7 @@ int BPF_PROG(close_e,
 {
 	if(maps__get_dropping_mode())
 	{
-		s32 fd = (s32)extract__syscall_argument(regs, 0);
+		int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
 		/* We drop the event if we are closing a negative file descriptor */
 		if(fd < 0)
 		{
@@ -24,8 +25,8 @@ int BPF_PROG(close_e,
 		}
 
 		struct task_struct *task = get_current_task();
-		u32 max_fds = 0;
-		READ_TASK_FIELD_INTO(&max_fds, task, files, fdt, max_fds);
+		uint32_t max_fds = 0;
+		BPF_CORE_READ_INTO(&max_fds, task, files, fdt, max_fds);
 		/* We drop the event if the fd is >= than `max_fds` */
 		if(fd >= max_fds)
 		{
@@ -34,7 +35,7 @@ int BPF_PROG(close_e,
 
 		/* We drop the event if the fd is not open */
 		long unsigned int entry = 0;
-		long unsigned int *open_fds = READ_TASK_FIELD(task, files, fdt, open_fds);
+		long unsigned int *open_fds = BPF_CORE_READ(task, files, fdt, open_fds);
 		if(open_fds == NULL)
 		{
 			return 0;
@@ -49,18 +50,18 @@ int BPF_PROG(close_e,
 	}
 
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, CLOSE_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, CLOSE_E_SIZE, PPME_SYSCALL_CLOSE_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_CLOSE_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: fd (type: PT_FD)*/
-	s32 fd = (s32)extract__syscall_argument(regs, 0);
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)extract__syscall_argument(regs, 0);
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -84,12 +85,12 @@ int BPF_PROG(close_x,
 	}
 
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, CLOSE_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, CLOSE_X_SIZE, PPME_SYSCALL_CLOSE_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_CLOSE_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +21,10 @@ limitations under the License.
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef __GNUC__
 int32_t scap_errprintf_unchecked(char *buf, int errnum, const char* fmt, ...) __attribute__ ((format (printf, 3, 4)));
 #define scap_errprintf scap_errprintf_unchecked
@@ -29,4 +34,8 @@ int32_t scap_errprintf_unchecked(char *buf, int errnum, const char* fmt, ...) __
 
 #define scap_errprintf(BUF, ERRNUM, ...) ((void)sizeof(printf(__VA_ARGS__)), scap_errprintf_unchecked(BUF, ERRNUM, __VA_ARGS__))
 int32_t scap_errprintf_unchecked(char *buf, int errnum, const char* fmt, ...);
+#endif
+
+#ifdef __cplusplus
+};
 #endif

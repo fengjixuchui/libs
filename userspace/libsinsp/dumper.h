@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +21,9 @@ limitations under the License.
 class sinsp;
 class sinsp_evt;
 
-#include "scap_savefile_api.h"
+#include <libscap/scap_savefile_api.h>
+
+#include <string>
 
 typedef struct scap_dumper scap_dumper_t;
 
@@ -67,15 +70,9 @@ public:
 	  \note There's no close() because the file is closed when the dumper is
 	   destroyed.
 	*/
-	void open(sinsp* inspector,
-		const std::string& filename,
-		bool compress,
-		bool threads_from_sinsp=false);
+	void open(sinsp* inspector, const std::string& filename, bool compress);
 
-	void fdopen(sinsp* inspector,
-		int fd,
-		bool compress,
-		bool threads_from_sinsp=false);
+	void fdopen(sinsp* inspector, int fd, bool compress);
 
 	/*!
 	  \brief Closes the dump file.

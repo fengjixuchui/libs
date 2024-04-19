@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,10 +30,12 @@ struct iovec {
 };
 #endif
 
-#include "scap.h"
-#include "scap-int.h"
-#include "scap_savefile_api.h"
-#include "scap_savefile.h"
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
+#include <libscap/scap_platform_impl.h>
+#include <libscap/scap_savefile_api.h>
+#include <libscap/scap_savefile.h>
+#include <libscap/strl.h>
 
 const char* scap_dump_getlasterr(scap_dumper_t* d)
 {
@@ -196,6 +199,8 @@ static uint32_t scap_fd_info_len(scap_fdinfo *fdi)
 	case SCAP_FD_BPF:
 	case SCAP_FD_USERFAULTFD:
 	case SCAP_FD_IOURING:
+	case SCAP_FD_MEMFD:
+	case SCAP_FD_PIDFD:
 		res += (uint32_t)strnlen(fdi->info.fname, SCAP_MAX_PATH_SIZE) + 2;    // 2 is the length field before the string
 		break;
 	default:
@@ -310,6 +315,8 @@ static int32_t scap_fd_write_to_disk(scap_dumper_t *d, scap_fdinfo *fdi, uint32_
 	case SCAP_FD_BPF:
 	case SCAP_FD_USERFAULTFD:
 	case SCAP_FD_IOURING:
+	case SCAP_FD_MEMFD:
+	case SCAP_FD_PIDFD:
 		stlen = (uint16_t)strnlen(fdi->info.fname, SCAP_MAX_PATH_SIZE);
 		if(scap_dump_write(d, &stlen,  sizeof(uint16_t)) != sizeof(uint16_t) ||
 		        (stlen > 0 && scap_dump_write(d, fdi->info.fname, stlen) != stlen))
@@ -553,7 +560,7 @@ static int32_t scap_write_proclist_entry(scap_dumper_t *d, struct scap_threadinf
 {
 	struct iovec args = {tinfo->args, tinfo->args_len};
 	struct iovec env = {tinfo->env, tinfo->env_len};
-	struct iovec cgroups = {tinfo->cgroups, tinfo->cgroups_len};
+	struct iovec cgroups = {tinfo->cgroups.path, tinfo->cgroups.len};
 
 	return scap_write_proclist_entry_bufs(d, tinfo, len,
 					      tinfo->comm,
@@ -637,8 +644,8 @@ int32_t scap_write_proclist_entry_bufs(scap_dumper_t *d, struct scap_threadinfo 
 			  2 + cgroupslen +
 			  2 + rootlen +
 			  sizeof(uint64_t) + // pidns_init_start_ts
-			  sizeof(int32_t) +  // tty
-			  sizeof(int32_t) +  // loginuid
+			  sizeof(uint32_t) +  // tty
+			  sizeof(uint32_t) +  // loginuid (auid)
 			  sizeof(uint8_t) +  // exe_writable
 			  sizeof(uint64_t) + // cap_inheritable
 			  sizeof(uint64_t) + // cap_permitted
@@ -646,7 +653,8 @@ int32_t scap_write_proclist_entry_bufs(scap_dumper_t *d, struct scap_threadinfo 
 			  sizeof(uint8_t) + // exe_upper_layer
 			  sizeof(uint64_t) + // exe_ino
 			  sizeof(uint64_t) + // exe_ino_ctime
-			  sizeof(uint64_t)); // exe_ino_mtime
+			  sizeof(uint64_t) + // exe_ino_mtime
+			  sizeof(uint8_t)); // exe_from_memfd
 
 	if(scap_dump_write(d, len, sizeof(uint32_t)) != sizeof(uint32_t) ||
 		    scap_dump_write(d, &(tinfo->tid), sizeof(uint64_t)) != sizeof(uint64_t) ||
@@ -682,7 +690,7 @@ int32_t scap_write_proclist_entry_bufs(scap_dumper_t *d, struct scap_threadinfo 
 		    scap_dump_write(d, &rootlen, sizeof(uint16_t)) != sizeof(uint16_t) ||
                     scap_dump_write(d, (char *) root, rootlen) != rootlen ||
 			scap_dump_write(d, &(tinfo->pidns_init_start_ts), sizeof(uint64_t)) != sizeof(uint64_t) ||
-			scap_dump_write(d, &(tinfo->tty), sizeof(int32_t)) != sizeof(int32_t) ||
+			scap_dump_write(d, &(tinfo->tty), sizeof(uint32_t)) != sizeof(uint32_t) ||
             scap_dump_write(d, &(tinfo->loginuid), sizeof(uint32_t)) != sizeof(uint32_t) ||
 			scap_dump_write(d, &(tinfo->exe_writable), sizeof(uint8_t)) != sizeof(uint8_t) ||
 			scap_dump_write(d, &(tinfo->cap_inheritable), sizeof(uint64_t)) != sizeof(uint64_t) ||
@@ -691,7 +699,8 @@ int32_t scap_write_proclist_entry_bufs(scap_dumper_t *d, struct scap_threadinfo 
 			scap_dump_write(d, &(tinfo->exe_upper_layer), sizeof(uint8_t)) != sizeof(uint8_t) ||
 			scap_dump_write(d, &(tinfo->exe_ino), sizeof(uint64_t)) != sizeof(uint64_t) ||
 			scap_dump_write(d, &(tinfo->exe_ino_ctime), sizeof(uint64_t)) != sizeof(uint64_t) ||
-			scap_dump_write(d, &(tinfo->exe_ino_mtime), sizeof(uint64_t)) != sizeof(uint64_t))
+			scap_dump_write(d, &(tinfo->exe_ino_mtime), sizeof(uint64_t)) != sizeof(uint64_t) ||
+			scap_dump_write(d, &(tinfo->exe_from_memfd), sizeof(uint8_t)) != sizeof(uint8_t))
 	{
 		snprintf(d->m_lasterr, SCAP_LASTERR_SIZE, "error writing to file (2)");
 		return SCAP_FAILURE;
@@ -1030,7 +1039,7 @@ static int32_t scap_write_userlist(scap_dumper_t* d, struct scap_userlist *userl
 //
 // Create the dump file headers and add the tables
 //
-static int32_t scap_setup_dump(scap_t *handle, scap_dumper_t* d, const char *fname)
+static int32_t scap_setup_dump(scap_dumper_t* d, struct scap_platform *platform, const char *fname)
 {
 	block_header bh;
 	section_header_block sh;
@@ -1057,12 +1066,12 @@ static int32_t scap_setup_dump(scap_t *handle, scap_dumper_t* d, const char *fna
 		return SCAP_FAILURE;
 	}
 
-	if(handle->m_mode != SCAP_MODE_PLUGIN)
+	if(platform)
 	{
 		//
 		// Write the machine info
 		//
-		if(scap_write_machine_info(d, &handle->m_machine_info) != SCAP_SUCCESS)
+		if(scap_write_machine_info(d, &platform->m_machine_info) != SCAP_SUCCESS)
 		{
 			return SCAP_FAILURE;
 		}
@@ -1070,7 +1079,7 @@ static int32_t scap_setup_dump(scap_t *handle, scap_dumper_t* d, const char *fna
 		//
 		// Write the interface list
 		//
-		if(scap_write_iflist(d, handle->m_addrlist) != SCAP_SUCCESS)
+		if(scap_write_iflist(d, platform->m_addrlist) != SCAP_SUCCESS)
 		{
 			return SCAP_FAILURE;
 		}
@@ -1078,7 +1087,7 @@ static int32_t scap_setup_dump(scap_t *handle, scap_dumper_t* d, const char *fna
 		//
 		// Write the user list
 		//
-		if(scap_write_userlist(d, handle->m_userlist) != SCAP_SUCCESS)
+		if(scap_write_userlist(d, platform->m_userlist) != SCAP_SUCCESS)
 		{
 			return SCAP_FAILURE;
 		}
@@ -1086,7 +1095,7 @@ static int32_t scap_setup_dump(scap_t *handle, scap_dumper_t* d, const char *fna
 		//
 		// Write the process list
 		//
-		if(scap_write_proclist(d, &handle->m_proclist) != SCAP_SUCCESS)
+		if(scap_write_proclist(d, &platform->m_proclist) != SCAP_SUCCESS)
 		{
 			return SCAP_FAILURE;
 		}
@@ -1094,7 +1103,7 @@ static int32_t scap_setup_dump(scap_t *handle, scap_dumper_t* d, const char *fna
 		//
 		// Write the fd lists
 		//
-		if(scap_write_fdlist(d, &handle->m_proclist) != SCAP_SUCCESS)
+		if(scap_write_fdlist(d, &platform->m_proclist) != SCAP_SUCCESS)
 		{
 			return SCAP_FAILURE;
 		}
@@ -1106,20 +1115,8 @@ static int32_t scap_setup_dump(scap_t *handle, scap_dumper_t* d, const char *fna
 	return SCAP_SUCCESS;
 }
 
-static inline int32_t scap_dump_rescan_proc(scap_t *handle)
-{
-	int32_t ret = SCAP_SUCCESS;
-#ifdef __linux__
-	proc_entry_callback tcb = handle->m_proclist.m_proc_callback;
-	handle->m_proclist.m_proc_callback = NULL;
-	ret = scap_refresh_proc_table(handle);
-	handle->m_proclist.m_proc_callback = tcb;
-#endif
-	return ret;
-}
-
 // fname is only used for log messages in scap_setup_dump
-static scap_dumper_t *scap_dump_open_gzfile(scap_t *handle, gzFile gzfile, const char *fname, bool skip_proc_scan)
+static scap_dumper_t *scap_dump_open_gzfile(struct scap_platform* platform, gzFile gzfile, const char *fname, char* lasterr)
 {
 	scap_dumper_t* res = (scap_dumper_t*)malloc(sizeof(scap_dumper_t));
 	res->m_f = gzfile;
@@ -1128,9 +1125,9 @@ static scap_dumper_t *scap_dump_open_gzfile(scap_t *handle, gzFile gzfile, const
 	res->m_targetbufcurpos = NULL;
 	res->m_targetbufend = NULL;
 
-	if(scap_setup_dump(handle, res, fname) != SCAP_SUCCESS)
+	if(scap_setup_dump(res, platform, fname) != SCAP_SUCCESS)
 	{
-		strcpy(handle->m_lasterr, res->m_lasterr);
+		strlcpy(lasterr, res->m_lasterr, SCAP_LASTERR_SIZE);
 		free(res);
 		res = NULL;
 	}
@@ -1141,12 +1138,12 @@ static scap_dumper_t *scap_dump_open_gzfile(scap_t *handle, gzFile gzfile, const
 //
 // Open a "savefile" for writing.
 //
-scap_dumper_t *scap_dump_open(scap_t *handle, const char *fname, compression_mode compress, bool skip_proc_scan)
+scap_dumper_t *scap_dump_open(struct scap_platform *platform, const char *fname, compression_mode compress,
+			      char *lasterr)
 {
 	gzFile f = NULL;
 	int fd = -1;
 	const char* mode;
-	scap_dumper_t* res;
 
 	switch(compress)
 	{
@@ -1158,7 +1155,7 @@ scap_dumper_t *scap_dump_open(scap_t *handle, const char *fname, compression_mod
 		break;
 	default:
 		ASSERT(false);
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "invalid compression mode");
+		snprintf(lasterr, SCAP_LASTERR_SIZE, "invalid compression mode");
 		return NULL;
 	}
 
@@ -1189,41 +1186,18 @@ scap_dumper_t *scap_dump_open(scap_t *handle, const char *fname, compression_mod
 		}
 #endif
 
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "can't open %s", fname);
+		snprintf(lasterr, SCAP_LASTERR_SIZE, "can't open %s", fname);
 		return NULL;
 	}
 
-	//
-	// If we're dumping in live mode, refresh the process tables list
-	// so we don't lose information about processes created in the interval
-	// between opening the handle and starting the dump
-	//
-	if(handle->m_mode != SCAP_MODE_CAPTURE && !skip_proc_scan)
-	{
-		if(scap_dump_rescan_proc(handle) != SCAP_SUCCESS)
-		{
-			return NULL;
-		}
-	}
-
-	res = scap_dump_open_gzfile(handle, f, fname, skip_proc_scan);
-	//
-	// If the user doesn't need the thread table, free it
-	//
-	if(handle->m_proclist.m_proc_callback != NULL)
-	{
-		scap_proc_free_table(&handle->m_proclist);
-	}
-
-	return res;
+	return scap_dump_open_gzfile(platform, f, fname, lasterr);
 }
 
 //
 // Open a savefile for writing, using the provided fd
-scap_dumper_t* scap_dump_open_fd(scap_t *handle, int fd, compression_mode compress, bool skip_proc_scan)
+scap_dumper_t* scap_dump_open_fd(struct scap_platform* platform, int fd, compression_mode compress, bool skip_proc_scan, char* lasterr)
 {
 	gzFile f = NULL;
-	scap_dumper_t* res;
 
 	switch(compress)
 	{
@@ -1235,50 +1209,28 @@ scap_dumper_t* scap_dump_open_fd(scap_t *handle, int fd, compression_mode compre
 		break;
 	default:
 		ASSERT(false);
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "invalid compression mode");
+		snprintf(lasterr, SCAP_LASTERR_SIZE, "invalid compression mode");
 		return NULL;
 	}
 	
 	if(f == NULL)
 	{
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "can't open fd %d", fd);
+		snprintf(lasterr, SCAP_LASTERR_SIZE, "can't open fd %d", fd);
 		return NULL;
 	}
 
-	//
-	// If we're dumping in live mode, refresh the process tables list
-	// so we don't lose information about processes created in the interval
-	// between opening the handle and starting the dump
-	//
-	if(handle->m_mode != SCAP_MODE_CAPTURE && !skip_proc_scan)
-	{
-		if(scap_dump_rescan_proc(handle) != SCAP_SUCCESS)
-		{
-			return NULL;
-		}
-	}
-
-	res = scap_dump_open_gzfile(handle, f, "", skip_proc_scan);
-
-	//
-	// If the user doesn't need the thread table, free it
-	//
-	if(handle->m_proclist.m_proc_callback != NULL)
-	{
-		scap_proc_free_table(&handle->m_proclist);
-	}
-	return res;
+	return scap_dump_open_gzfile(platform, f, "", lasterr);
 }
 
 //
 // Open a memory "savefile"
 //
-scap_dumper_t *scap_memory_dump_open(scap_t *handle, uint8_t* targetbuf, uint64_t targetbufsize)
+scap_dumper_t *scap_memory_dump_open(struct scap_platform* platform, uint8_t* targetbuf, uint64_t targetbufsize, char* lasterr)
 {
 	scap_dumper_t* res = (scap_dumper_t*)malloc(sizeof(scap_dumper_t));
 	if(res == NULL)
 	{
-		snprintf(handle->m_lasterr, SCAP_LASTERR_SIZE, "scap_dump_memory_open memory allocation failure (1)");
+		snprintf(lasterr, SCAP_LASTERR_SIZE, "scap_dump_memory_open memory allocation failure (1)");
 		return NULL;
 	}
 
@@ -1288,9 +1240,9 @@ scap_dumper_t *scap_memory_dump_open(scap_t *handle, uint8_t* targetbuf, uint64_
 	res->m_targetbufcurpos = targetbuf;
 	res->m_targetbufend = targetbuf + targetbufsize;
 
-	if(scap_setup_dump(handle, res, "") != SCAP_SUCCESS)
+	if(scap_setup_dump(res, platform, "") != SCAP_SUCCESS)
 	{
-		strcpy(handle->m_lasterr, res->m_lasterr);
+		strlcpy(lasterr, res->m_lasterr, SCAP_LASTERR_SIZE);
 		free(res);
 		res = NULL;
 	}

@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only OR MIT
 #
-# Copyright (C) 2022 The Falco Authors.
+# Copyright (C) 2023 The Falco Authors.
 #
 # This file is dual licensed under either the MIT or GPL 2. See
 # MIT.txt or GPL.txt for full copies of the license.
@@ -11,7 +12,9 @@ project(driver)
 set(TARGET_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
 if((NOT TARGET_ARCH STREQUAL "x86_64") AND
    (NOT TARGET_ARCH STREQUAL "aarch64") AND
-   (NOT TARGET_ARCH STREQUAL "s390x"))
+   (NOT TARGET_ARCH STREQUAL "s390x") AND
+   (NOT TARGET_ARCH STREQUAL "riscv64") AND
+   (NOT TARGET_ARCH STREQUAL "ppc64le"))
 	message(WARNING "Target architecture not officially supported by our drivers!")
 else()
 	# Load current kernel version
@@ -23,6 +26,8 @@ else()
 	set(kmod_min_kver_map_x86_64 2.6)
 	set(kmod_min_kver_map_aarch64 3.16)
 	set(kmod_min_kver_map_s390x 2.6)
+	set(kmod_min_kver_map_riscv64 5.0)
+	set(kmod_min_kver_map_ppc64le 2.6)
 	if (LINUX_KERNEL_VERSION VERSION_LESS ${kmod_min_kver_map_${TARGET_ARCH}})
 		message(WARNING "[KMOD] To run this driver you need a Linux kernel version >= ${kmod_min_kver_map_${TARGET_ARCH}} but actual kernel version is: ${UNAME_RESULT}")
 	endif()
@@ -39,6 +44,9 @@ endif()
 
 if(NOT DEFINED DRIVER_COMPONENT_NAME)
 	set(DRIVER_COMPONENT_NAME "scap-driver")
+endif()
+if(NOT DEFINED DRIVER_KMOD_COMPONENT_NAME)
+	set(DRIVER_KMOD_COMPONENT_NAME ${DRIVER_COMPONENT_NAME})
 endif()
 
 if(NOT DEFINED DRIVER_PACKAGE_NAME)
@@ -90,6 +98,30 @@ configure_file(dkms.conf.in src/dkms.conf)
 configure_file(Makefile.in src/Makefile)
 configure_file(driver_config.h.in src/driver_config.h)
 
+#
+# Copy all the "configure" modules
+#
+file(GLOB configure_modules "${CMAKE_CURRENT_SOURCE_DIR}/configure/*")
+foreach(subdir ${configure_modules})
+	if(IS_DIRECTORY "${subdir}")
+		file(RELATIVE_PATH CONFIGURE_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/configure" "${subdir}")
+		configure_file(configure/${CONFIGURE_MODULE}/test.c src/configure/${CONFIGURE_MODULE}/test.c COPYONLY)
+		configure_file(configure/Makefile src/configure/${CONFIGURE_MODULE}/Makefile COPYONLY)
+		configure_file(configure/build.sh src/configure/${CONFIGURE_MODULE}/build.sh COPYONLY)
+		configure_file(configure/Makefile.inc.in src/configure/${CONFIGURE_MODULE}/Makefile.inc)
+		if(ENABLE_DKMS)
+			install(FILES
+				"${CMAKE_CURRENT_BINARY_DIR}/src/configure/${CONFIGURE_MODULE}/build.sh"
+				"${CMAKE_CURRENT_BINARY_DIR}/src/configure/${CONFIGURE_MODULE}/test.c"
+				"${CMAKE_CURRENT_BINARY_DIR}/src/configure/${CONFIGURE_MODULE}/Makefile"
+				"${CMAKE_CURRENT_BINARY_DIR}/src/configure/${CONFIGURE_MODULE}/Makefile.inc"
+				DESTINATION "src/${DRIVER_PACKAGE_NAME}-${DRIVER_VERSION}/configure/${CONFIGURE_MODULE}"
+				COMPONENT ${DRIVER_KMOD_COMPONENT_NAME})
+		endif()
+	endif()
+endforeach()
+
+
 set(DRIVER_SOURCES
 	dynamic_params_table.c
 	event_table.c
@@ -107,9 +139,7 @@ set(DRIVER_SOURCES
 	ppm_fillers.h
 	ppm_flag_helpers.h
 	ppm_ringbuffer.h
-	ppm_syscall.h
 	syscall_table.c
-	syscall_table32.c
 	syscall_table64.c
 	ppm_cputime.c
 	ppm_version.h
@@ -118,6 +148,8 @@ set(DRIVER_SOURCES
 	ppm_tp.c
 	ppm_consumer.h
 	capture_macro.h
+	socketcall_to_syscall.h
+	syscall_ia32_64_map.c
 )
 
 foreach(FILENAME IN LISTS DRIVER_SOURCES)
@@ -161,7 +193,7 @@ if(ENABLE_DKMS)
 		${CMAKE_CURRENT_BINARY_DIR}/src/driver_config.h
 		${DRIVER_SOURCES}
 		DESTINATION "src/${DRIVER_PACKAGE_NAME}-${DRIVER_VERSION}"
-		COMPONENT ${DRIVER_COMPONENT_NAME})
+		COMPONENT ${DRIVER_KMOD_COMPONENT_NAME})
 endif()
 
 add_subdirectory(bpf)

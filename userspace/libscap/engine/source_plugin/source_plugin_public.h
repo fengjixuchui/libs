@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -13,7 +14,7 @@ limitations under the License.
 
 #pragma once
 
-#include "plugin_info.h"
+#include <libscap/engine/source_plugin/plugin_info.h>
 
 #define SOURCE_PLUGIN_ENGINE "source_plugin"
 

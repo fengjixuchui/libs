@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,10 +26,10 @@ limitations under the License.
 #include <netinet/in.h>
 #endif // _WIN32
 
-#include "scap.h"
-#include "scap-int.h"
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
 
-#include "strlcpy.h"
+#include <libscap/strl.h>
 
 //
 // Get the event info table
@@ -38,13 +39,13 @@ const struct ppm_event_info* scap_get_event_info_table()
 	return g_event_info;
 }
 
-const enum ppm_event_category scap_get_syscall_category_from_event(ppm_event_code ev)
+enum ppm_event_category scap_get_syscall_category_from_event(ppm_event_code ev)
 {
 	ASSERT(ev < PPM_EVENT_MAX);
 	return g_event_info[ev].category & (EC_SYSCALL -1);
 }
 
-const enum ppm_event_category scap_get_event_category_from_event(ppm_event_code ev)
+enum ppm_event_category scap_get_event_category_from_event(ppm_event_code ev)
 {
 	ASSERT(ev < PPM_EVENT_MAX);
 	return g_event_info[ev].category & ~(EC_SYSCALL -1);
@@ -330,7 +331,10 @@ int32_t scap_event_encode_params_v(const struct scap_sized_buffer event_buf, siz
 	len = len + sizeof(uint32_t);
 #endif
 
-	*event_size = len;
+	if (event_size != NULL)
+	{
+		*event_size = len;
+	}
 
 	// we were not able to write the event to the buffer
 	if (!scap_buffer_can_fit(event_buf, len))

@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2021 The Falco Authors.Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -10,24 +11,24 @@ or GPL2.txt for full copies of the license.
 #ifndef EVENTS_PUBLIC_H_
 #define EVENTS_PUBLIC_H_
 
-#if defined(__sun)
-#include <sys/ioccom.h>
-#endif
-
 #ifdef __KERNEL__
 #include <linux/types.h>
 #elif defined(__USE_VMLINUX__ )
 /* In the modern probe, if we have the vmlinux.h we need nothing here. */
 #else
-#include "../userspace/common/types.h"
+#include <stdint.h>
 #endif
 
 #include "./feature_gates.h"
 
+#ifndef UINT32_MAX
+#define UINT32_MAX (4294967295U)
+#endif
+
 /*
  * Macros for packing in different build environments
  */
-#if !defined(CYGWING_AGENT) && defined(_WIN32)
+#if defined(_WIN32)
 #define _packed __pragma(pack(push, 1)); __pragma(pack(pop))
 #else
 #define _packed __attribute__((packed))
@@ -103,6 +104,7 @@ or GPL2.txt for full copies of the license.
 #define PPM_O_LARGEFILE (1 << 11)
 #define PPM_O_CLOEXEC	(1 << 12)
 #define PPM_O_TMPFILE	(1 << 13)
+#define PPM_O_F_CREATED (1 << 14)	/* file created during the syscall */
 
 /*
  * File modes
@@ -120,6 +122,15 @@ or GPL2.txt for full copies of the license.
 #define PPM_S_ISVTX (1 << 9)
 #define PPM_S_ISGID (1 << 10)
 #define PPM_S_ISUID (1 << 11)
+
+/*
+ * mknod() modes
+ */
+#define PPM_S_IFREG  0100000
+#define PPM_S_IFCHR  0020000
+#define PPM_S_IFBLK  0060000
+#define PPM_S_IFIFO  0010000
+#define PPM_S_IFSOCK 0140000
 
 /*
  * flock() flags
@@ -262,6 +273,7 @@ or GPL2.txt for full copies of the license.
 #define PPM_SHUT_RD 0
 #define PPM_SHUT_WR 1
 #define PPM_SHUT_RDWR 2
+#define PPM_SHUT_UNKNOWN 0xffff
 
 /*
  * fs *at() flags
@@ -278,6 +290,13 @@ or GPL2.txt for full copies of the license.
  */
 #define PPM_AT_SYMLINK_FOLLOW	0x400
 #define PPM_AT_EMPTY_PATH       0x1000
+
+/*
+ * newfstatat() flags
+ */
+#define PPM_AT_NO_AUTOMOUNT		0x800
+#define PPM_AT_SYMLINK_NOFOLLOW	0x100
+
 
 /*
  * rlimit resources
@@ -614,6 +633,7 @@ or GPL2.txt for full copies of the license.
  */
 #define PPM_EXE_WRITABLE		(1 << 0)
 #define PPM_EXE_UPPER_LAYER 	(1 << 1)
+#define PPM_EXE_FROM_MEMFD  	(1 << 2)
   
 /*
  * Execveat flags
@@ -695,6 +715,13 @@ or GPL2.txt for full copies of the license.
 #define PPM_MLOCK_ONFAULT	(1<<0)
 
 /*
+ * Memfd_create flags
+ */
+#define PPM_MFD_CLOEXEC 		(1<<0)
+#define PPM_MFD_ALLOW_SEALING 	(1<<1)
+#define PPM_MFD_HUGETLB 		(1<<2)
+
+/*
  * Fsconfig flags
  */
 #define PPM_FSCONFIG_SET_FLAG	0
@@ -766,6 +793,65 @@ or GPL2.txt for full copies of the license.
 /* Get/set securebits (as per security/commoncap.c) */
 #define PPM_PR_GET_SECUREBITS 27
 #define PPM_PR_SET_SECUREBITS 28
+
+/*
+ * pidfd_open flags	
+*/
+#define PPM_PIDFD_NONBLOCK (1<<0)
+
+/*
+ * finit_module flags	
+*/
+#define PPM_MODULE_INIT_IGNORE_MODVERSIONS	1
+#define PPM_MODULE_INIT_IGNORE_VERMAGIC     2
+#define PPM_MODULE_INIT_COMPRESSED_FILE     4
+
+/*
+ * delete_module flags
+*/
+#define PPM_DELETE_MODULE_O_TRUNC		(1 << 0)
+#define PPM_DELETE_MODULE_O_NONBLOCK	(1 << 1)
+
+/*
+ * bpf_commands 
+*/
+#define PPM_BPF_MAP_CREATE			0
+#define	PPM_BPF_MAP_LOOKUP_ELEM     1
+#define	PPM_BPF_MAP_UPDATE_ELEM		2
+#define	PPM_BPF_MAP_DELETE_ELEM		3
+#define	PPM_BPF_MAP_GET_NEXT_KEY	4
+#define	PPM_BPF_PROG_LOAD			5
+#define	PPM_BPF_OBJ_PIN				6
+#define	PPM_BPF_OBJ_GET				7
+#define	PPM_BPF_PROG_ATTACH			8
+#define	PPM_BPF_PROG_DETACH			9
+#define	PPM_BPF_PROG_TEST_RUN		10
+#define	PPM_BPF_PROG_RUN  PPM_BPF_PROG_TEST_RUN
+#define	PPM_BPF_PROG_GET_NEXT_ID	11
+#define	PPM_BPF_MAP_GET_NEXT_ID		12
+#define	PPM_BPF_PROG_GET_FD_BY_ID	13
+#define	PPM_BPF_MAP_GET_FD_BY_ID	14
+#define	PPM_BPF_OBJ_GET_INFO_BY_FD	15
+#define	PPM_BPF_PROG_QUERY			16
+#define	PPM_BPF_RAW_TRACEPOINT_OPEN	17
+#define	PPM_BPF_BTF_LOAD			18
+#define	PPM_BPF_BTF_GET_FD_BY_ID	19
+#define	PPM_BPF_TASK_FD_QUERY		20
+#define	PPM_BPF_MAP_LOOKUP_AND_DELETE_ELEM 21
+#define	PPM_BPF_MAP_FREEZE			22
+#define	PPM_BPF_BTF_GET_NEXT_ID		23
+#define	PPM_BPF_MAP_LOOKUP_BATCH	24		
+#define	PPM_BPF_MAP_LOOKUP_AND_DELETE_BATCH 25
+#define	PPM_BPF_MAP_UPDATE_BATCH	26
+#define	PPM_BPF_MAP_DELETE_BATCH	27
+#define	PPM_BPF_LINK_CREATE			28
+#define	PPM_BPF_LINK_UPDATE			29
+#define	PPM_BPF_LINK_GET_FD_BY_ID	30
+#define	PPM_BPF_LINK_GET_NEXT_ID	31
+#define	PPM_BPF_ENABLE_STATS		32
+#define	PPM_BPF_ITER_CREATE			33
+#define	PPM_BPF_LINK_DETACH			34
+#define	PPM_BPF_PROG_BIND_MAP		35
 
 /*
  * Get/set the timerslack as used by poll/select/nanosleep
@@ -1366,7 +1452,31 @@ typedef enum {
 	PPME_SYSCALL_SIGNALFD4_X = 399,
 	PPME_SYSCALL_PRCTL_E = 400,
 	PPME_SYSCALL_PRCTL_X = 401,
-	PPM_EVENT_MAX = 402
+	PPME_ASYNCEVENT_E = 402,
+	PPME_ASYNCEVENT_X = 403,
+	PPME_SYSCALL_MEMFD_CREATE_E = 404,
+	PPME_SYSCALL_MEMFD_CREATE_X = 405,
+	PPME_SYSCALL_PIDFD_GETFD_E = 406,
+	PPME_SYSCALL_PIDFD_GETFD_X = 407,
+	PPME_SYSCALL_PIDFD_OPEN_E = 408,
+	PPME_SYSCALL_PIDFD_OPEN_X = 409,
+	PPME_SYSCALL_INIT_MODULE_E = 410,
+	PPME_SYSCALL_INIT_MODULE_X = 411,
+	PPME_SYSCALL_FINIT_MODULE_E = 412,
+	PPME_SYSCALL_FINIT_MODULE_X = 413,
+	PPME_SYSCALL_MKNOD_E = 414,
+	PPME_SYSCALL_MKNOD_X = 415,
+	PPME_SYSCALL_MKNODAT_E = 416,
+	PPME_SYSCALL_MKNODAT_X = 417,
+	PPME_SYSCALL_NEWFSTATAT_E = 418,
+	PPME_SYSCALL_NEWFSTATAT_X = 419,
+	PPME_SYSCALL_PROCESS_VM_READV_E = 420,
+	PPME_SYSCALL_PROCESS_VM_READV_X = 421,
+	PPME_SYSCALL_PROCESS_VM_WRITEV_E = 422,
+	PPME_SYSCALL_PROCESS_VM_WRITEV_X = 423,
+	PPME_SYSCALL_DELETE_MODULE_E = 424,
+	PPME_SYSCALL_DELETE_MODULE_X = 425,
+	PPM_EVENT_MAX = 426
 } ppm_event_code;
 /*@}*/
 
@@ -1397,7 +1507,11 @@ enum extra_event_prog_code
 	T1_DROP_E = 13,
 	T1_DROP_X = 14,
 	T1_HOTPLUG_E = 15,
-	TAIL_EXTRA_EVENT_PROG_MAX = 16
+	T1_OPEN_BY_HANDLE_AT_X =16,
+	T2_EXECVE_X = 17,
+	T2_EXECVEAT_X = 18,
+	T2_SCHED_PROC_EXEC = 19,
+	TAIL_EXTRA_EVENT_PROG_MAX = 20
 };
 
 /*
@@ -1816,7 +1930,37 @@ enum extra_event_prog_code
 	PPM_SC_X(IDLE, 408) \
 	PPM_SC_X(S390_RUNTIME_INSTR, 409) \
 	PPM_SC_X(SIGRETURN, 410) \
-	PPM_SC_X(S390_GUARDED_STORAGE, 411)
+	PPM_SC_X(S390_GUARDED_STORAGE, 411) \
+	PPM_SC_X(CACHESTAT, 412) \
+	PPM_SC_X(FCHMODAT2, 413) \
+	PPM_SC_X(MAP_SHADOW_STACK, 414) \
+	PPM_SC_X(RISCV_FLUSH_ICACHE, 415) \
+	PPM_SC_X(RISCV_HWPROBE, 416) \
+	PPM_SC_X(FUTEX_WAKE, 417) \
+	PPM_SC_X(FUTEX_REQUEUE, 418) \
+	PPM_SC_X(FUTEX_WAIT, 419) \
+	PPM_SC_X(OLDSTAT, 420) \
+	PPM_SC_X(SWITCH_ENDIAN, 421) \
+	PPM_SC_X(MULTIPLEXER, 422) \
+	PPM_SC_X(OLDLSTAT, 423) \
+	PPM_SC_X(SPU_CREATE, 424) \
+	PPM_SC_X(SYNC_FILE_RANGE2, 425) \
+	PPM_SC_X(OLDFSTAT, 426) \
+	PPM_SC_X(SPU_RUN, 427) \
+	PPM_SC_X(SWAPCONTEXT, 428) \
+	PPM_SC_X(PCICONFIG_WRITE, 429) \
+	PPM_SC_X(RTAS, 430) \
+	PPM_SC_X(PCICONFIG_READ, 431) \
+	PPM_SC_X(SYS_DEBUG_SETCONTEXT, 432) \
+	PPM_SC_X(VM86, 433) \
+	PPM_SC_X(OLDOLDUNAME, 434) \
+	PPM_SC_X(SUBPAGE_PROT, 435) \
+	PPM_SC_X(PCICONFIG_IOBASE, 436) \
+	PPM_SC_X(LISTMOUNT, 437) \
+	PPM_SC_X(STATMOUNT, 438) \
+	PPM_SC_X(LSM_GET_SELF_ATTR, 439) \
+	PPM_SC_X(LSM_SET_SELF_ATTR, 440) \
+	PPM_SC_X(LSM_LIST_MODULES, 441)
 
 typedef enum {
 #define PPM_SC_X(name, value) PPM_SC_##name = (value),
@@ -1974,8 +2118,6 @@ struct ppm_event_info {
 #if defined _MSC_VER
 #pragma pack(push)
 #pragma pack(1)
-#elif defined __sun
-#pragma pack(1)
 #else
 #pragma pack(push, 1)
 #endif
@@ -1989,16 +2131,11 @@ struct ppm_evt_hdr {
 	uint16_t type; /* the event type */
 	uint32_t nparams; /* the number of parameters of the event */
 };
-#if defined __sun
-#pragma pack()
-#else
 #pragma pack(pop)
-#endif
 
 /*
  * IOCTL codes
  */
-#ifndef CYGWING_AGENT
 #define PPM_IOCTL_MAGIC	's'
 // #define PPM_IOCTL_DISABLE_CAPTURE _IO(PPM_IOCTL_MAGIC, 0) Support dropped
 // #define PPM_IOCTL_ENABLE_CAPTURE _IO(PPM_IOCTL_MAGIC, 1) Support dropped
@@ -2017,7 +2154,7 @@ struct ppm_evt_hdr {
 // #define PPM_IOCTL_DISABLE_SIGNAL_DELIVER _IO(PPM_IOCTL_MAGIC, 14) Support dropped
 // #define PPM_IOCTL_ENABLE_SIGNAL_DELIVER _IO(PPM_IOCTL_MAGIC, 15) Support dropped
 #define PPM_IOCTL_GET_PROCLIST _IO(PPM_IOCTL_MAGIC, 16)
-#define PPM_IOCTL_SET_TRACERS_CAPTURE _IO(PPM_IOCTL_MAGIC, 17)
+// #define PPM_IOCTL_SET_TRACERS_CAPTURE _IO(PPM_IOCTL_MAGIC, 17) Support dropped
 // #define PPM_IOCTL_SET_SIMPLE_MODE _IO(PPM_IOCTL_MAGIC, 18) Support dropped
 // #define PPM_IOCTL_ENABLE_PAGE_FAULTS _IO(PPM_IOCTL_MAGIC, 19) Support dropped
 #define PPM_IOCTL_GET_N_TRACEPOINT_HIT _IO(PPM_IOCTL_MAGIC, 20)
@@ -2035,7 +2172,6 @@ struct ppm_evt_hdr {
 #define PPM_IOCTL_DISABLE_TP _IO(PPM_IOCTL_MAGIC, 32)
 #define PPM_IOCTL_ENABLE_DROPFAILED _IO(PPM_IOCTL_MAGIC, 33)
 #define PPM_IOCTL_DISABLE_DROPFAILED _IO(PPM_IOCTL_MAGIC, 34)
-#endif // CYGWING_AGENT
 
 extern const struct ppm_name_value socket_families[];
 extern const struct ppm_name_value file_flags[];
@@ -2066,7 +2202,9 @@ extern const struct ppm_name_value access_flags[];
 extern const struct ppm_name_value pf_flags[];
 extern const struct ppm_name_value unlinkat_flags[];
 extern const struct ppm_name_value linkat_flags[];
+extern const struct ppm_name_value newfstatat_flags[];
 extern const struct ppm_name_value chmod_mode[];
+extern const struct ppm_name_value mknod_mode[];
 extern const struct ppm_name_value renameat2_flags[];
 extern const struct ppm_name_value openat2_flags[];
 extern const struct ppm_name_value execve_flags[];
@@ -2081,11 +2219,14 @@ extern const struct ppm_name_value fsconfig_cmds[];
 extern const struct ppm_name_value epoll_create1_flags[];
 extern const struct ppm_name_value fchownat_flags[];
 extern const struct ppm_name_value prctl_options[];
-
+extern const struct ppm_name_value memfd_create_flags[];
+extern const struct ppm_name_value pidfd_open_flags[];
+extern const struct ppm_name_value bpf_commands[];
 extern const struct ppm_param_info sockopt_dynamic_param[];
 extern const struct ppm_param_info ptrace_dynamic_param[];
 extern const struct ppm_param_info bpf_dynamic_param[];
-
+extern const struct ppm_name_value delete_module_flags[];
+extern const struct ppm_name_value finit_module_flags[];
 /*!
   \brief Process information as returned by the PPM_IOCTL_GET_PROCLIST IOCTL.
 */
@@ -2127,9 +2268,9 @@ struct syscall_evt_pair {
 #define PPM_MAX_AUTOFILL_ARGS (1 << 2)
 
 /*
- * Max size of a parameter in the kernel module is u16, so no point
+ * Max size of a parameter in the kernel module is uint16_t, so no point
  * in going beyond 0xffff. However, in BPF the limit is more stringent
- * because the entire perf event must fit in u16, so make this
+ * because the entire perf event must fit in uint16_t, so make this
  * a more conservative 65k so we have some room for the other
  * parameters in the event. It shouldn't cause issues since typically
  * snaplen is much lower than this.

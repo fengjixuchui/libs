@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,10 +15,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-#include "container_engine/docker/docker_linux.h"
+#include <libsinsp/container_engine/docker/docker_linux.h>
 
-#include "runc.h"
-#include "sinsp_int.h"
+#include <libsinsp/runc.h>
+#include <libsinsp/sinsp_int.h>
 
 using namespace libsinsp::container_engine;
 using namespace libsinsp::runc;
@@ -53,7 +54,7 @@ bool docker_linux::resolve(sinsp_threadinfo *tinfo, bool query_os_for_missing_in
 void docker_linux::update_with_size(const std::string &container_id)
 {
 	auto cb = [this](const docker_lookup_request& instruction, const sinsp_container_info& res) {
-		g_logger.format(sinsp_logger::SEV_DEBUG,
+		libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 				"docker_async (%s): with size callback result=%d",
 				instruction.container_id.c_str(),
 				res.get_lookup_status());
@@ -62,7 +63,7 @@ void docker_linux::update_with_size(const std::string &container_id)
 		container_cache().replace_container(updated);
 	};
 
-	g_logger.format(sinsp_logger::SEV_DEBUG,
+	libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 			"docker_async size request (%s)",
 			container_id.c_str());
 

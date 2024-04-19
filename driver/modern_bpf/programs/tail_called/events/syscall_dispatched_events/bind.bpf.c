@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -15,23 +16,23 @@ int BPF_PROG(bind_e,
 	     struct pt_regs *regs,
 	     long id)
 {
-	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, BIND_E_SIZE))
-	{
-		return 0;
-	}
-
-	ringbuf__store_event_header(&ringbuf, PPME_SOCKET_BIND_E);
-
-	/*=============================== COLLECT PARAMETERS  ===========================*/
-
 	/* Collect parameters at the beginning to easily manage socketcalls */
 	unsigned long args[1];
 	extract__network_args(args, 1, regs);
 
+	struct ringbuf_struct ringbuf;
+	if(!ringbuf__reserve_space(&ringbuf, ctx, BIND_E_SIZE, PPME_SOCKET_BIND_E))
+	{
+		return 0;
+	}
+
+	ringbuf__store_event_header(&ringbuf);
+
+	/*=============================== COLLECT PARAMETERS  ===========================*/
+
 	/* Parameter 1: fd (type: PT_FD) */
-	s32 fd = (s32)args[0];
-	ringbuf__store_s64(&ringbuf, (s64)fd);
+	int32_t fd = (int32_t)args[0];
+	ringbuf__store_s64(&ringbuf, (int64_t)fd);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -72,7 +73,7 @@ int BPF_PROG(bind_x,
 
 	/* Parameter 2: addr (type: PT_SOCKADDR) */
 	unsigned long sockaddr_ptr = args[1];
-	u16 addrlen = (u16)args[2];
+	uint16_t addrlen = (uint16_t)args[2];
 	auxmap__store_sockaddr_param(auxmap, sockaddr_ptr, addrlen);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/

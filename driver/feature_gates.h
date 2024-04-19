@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -60,23 +61,8 @@ or GPL2.txt for full copies of the license.
  * been introduced in the following kernel release:
  * https://github.com/torvalds/linux/commit/0a16b6075843325dc402edf80c1662838b929aff
  */
-#if defined(CONFIG_ARM64) || defined(CONFIG_S390)
+#if defined(CONFIG_ARM64) || defined(CONFIG_S390) || defined(CONFIG_RISCV)
 	#define CAPTURE_SCHED_PROC_FORK 
-#endif
-
-///////////////////////////////
-// CAPTURE_SOCKETCALL
-///////////////////////////////
-
-/* There are architectures that used history socketcall to multiplex
- * the network system calls.  Even if architectures, like s390x, has
- * direct support for those network system calls, kernel version header
- * dependencies in libc prevent using them.
- *
- * For details, see also https://sourceware.org/pipermail/libc-alpha/2022-September/142108.html
- */
-#if defined(CONFIG_S390)
-	#define CAPTURE_SOCKETCALL
 #endif
 
 ///////////////////////////////
@@ -170,7 +156,7 @@ or GPL2.txt for full copies of the license.
 // CAPTURE_SCHED_PROC_FORK 
 ///////////////////////////////
 
-#if defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_s390)
+#if defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_s390) || defined(__TARGET_ARCH_riscv)
 	#define CAPTURE_SCHED_PROC_FORK 
 #endif
 
@@ -182,20 +168,11 @@ or GPL2.txt for full copies of the license.
 	#define CAPTURE_PAGE_FAULTS 
 #endif
 
-///////////////////////////////
-// CAPTURE_SOCKETCALL
-///////////////////////////////
-
-#if defined(__TARGET_ARCH_s390)
-	#define CAPTURE_SOCKETCALL
-#endif
-
 #else /* Userspace */
 
 /* Please note: the userspace loads the filler table for the bpf probe
  * so it must define these macro according to what BPF supports
  */
-#ifndef UDIG
 
 ///////////////////////////////
 // CAPTURE_64BIT_ARGS_SINGLE_REGISTER 
@@ -229,7 +206,7 @@ or GPL2.txt for full copies of the license.
 // CAPTURE_SCHED_PROC_FORK 
 ///////////////////////////////
 
-#if defined(__aarch64__) || defined(__s390x__)
+#if defined(__aarch64__) || defined(__s390x__) || defined(__riscv)
 	#define CAPTURE_SCHED_PROC_FORK 
 #endif
 
@@ -240,16 +217,6 @@ or GPL2.txt for full copies of the license.
 #if defined(__aarch64__)
 	#define CAPTURE_SCHED_PROC_EXEC 
 #endif
-
-///////////////////////////////
-// CAPTURE_SOCKETCALL
-///////////////////////////////
-
-#if defined(__s390x__)
-	#define CAPTURE_SOCKETCALL
-#endif
-
-#endif /* UDIG */
 
 #endif /* __KERNEL__ */
 

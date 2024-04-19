@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -24,15 +25,15 @@ int BPF_PROG(sendto_e,
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Collect parameters at the beginning to manage socketcalls */
-	unsigned long args[3];
-	extract__network_args(args, 3, regs);
+	unsigned long args[5];
+	extract__network_args(args, 5, regs);
 
 	/* Parameter 1: fd (type: PT_FD) */
-	s32 socket_fd = (s32)args[0];
-	auxmap__store_s64_param(auxmap, (s64)socket_fd);
+	int32_t socket_fd = (int32_t)args[0];
+	auxmap__store_s64_param(auxmap, (int64_t)socket_fd);
 
 	/* Parameter 2: size (type: PT_UINT32) */
-	u32 size = (u32)args[2];
+	uint32_t size = (uint32_t)args[2];
 	auxmap__store_u32_param(auxmap, size);
 
 	/* Parameter 3: tuple (type: PT_SOCKTUPLE)*/
@@ -44,7 +45,8 @@ int BPF_PROG(sendto_e,
 	 */
 	if(socket_fd >= 0)
 	{
-		auxmap__store_socktuple_param(auxmap, socket_fd, OUTBOUND);
+		struct sockaddr *usrsockaddr = (struct sockaddr *)args[4];
+		auxmap__store_socktuple_param(auxmap, socket_fd, OUTBOUND, usrsockaddr);
 	}
 	else
 	{
@@ -83,16 +85,16 @@ int BPF_PROG(sendto_x,
 	auxmap__store_s64_param(auxmap, ret);
 
 	/* Collect parameters at the beginning to manage socketcalls */
-	unsigned long args[3];
-	extract__network_args(args, 3, regs);
+	unsigned long args[5];
+	extract__network_args(args, 5, regs);
 
 	/* If the syscall doesn't fail we use the return value as `size`
 	 * otherwise we need to rely on the syscall parameter provided by the user.
 	 */
-	u16 bytes_to_read = ret > 0 ? ret : args[2];
-	u16 snaplen = maps__get_snaplen();
-	apply_dynamic_snaplen(regs, &snaplen, false);
-	if(snaplen > bytes_to_read)
+	int64_t bytes_to_read = ret > 0 ? ret : args[2];
+	uint16_t snaplen = maps__get_snaplen();
+	apply_dynamic_snaplen(regs, &snaplen, false, (struct sockaddr*)args[4]);
+	if((int64_t)snaplen > bytes_to_read)
 	{
 		snaplen = bytes_to_read;
 	}

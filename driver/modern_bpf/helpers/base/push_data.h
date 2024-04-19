@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -108,10 +109,10 @@ enum read_memory
  * @param lengths_pos pointer to the first empty slot into the `lengths_arr`.
  * @param len length to store inside the array (16 bit).
  */
-static __always_inline void push__param_len(u8 *data, u8 *lengths_pos, u16 len)
+static __always_inline void push__param_len(uint8_t *data, uint8_t *lengths_pos, uint16_t len)
 {
-	*((u16 *)&data[SAFE_ACCESS(*lengths_pos)]) = len;
-	*lengths_pos += sizeof(u16);
+	*((uint16_t *)&data[SAFE_ACCESS(*lengths_pos)]) = len;
+	*lengths_pos += sizeof(uint16_t);
 }
 
 /* All the following `push__x` helpers can be seen as a sum of two operations:
@@ -134,55 +135,55 @@ static __always_inline void push__param_len(u8 *data, u8 *lengths_pos, u16 len)
 // PUSH FIXED DIMENSIONS
 ///////////////////////////
 
-static __always_inline void push__u8(u8 *data, u64 *payload_pos, u8 param)
+static __always_inline void push__u8(uint8_t *data, uint64_t *payload_pos, uint8_t param)
 {
-	*((u8 *)&data[SAFE_ACCESS(*payload_pos)]) = param;
-	*payload_pos += sizeof(u8);
+	*((uint8_t *)&data[SAFE_ACCESS(*payload_pos)]) = param;
+	*payload_pos += sizeof(uint8_t);
 }
 
-static __always_inline void push__u16(u8 *data, u64 *payload_pos, u16 param)
+static __always_inline void push__u16(uint8_t *data, uint64_t *payload_pos, uint16_t param)
 {
-	*((u16 *)&data[SAFE_ACCESS(*payload_pos)]) = param;
-	*payload_pos += sizeof(u16);
+	*((uint16_t *)&data[SAFE_ACCESS(*payload_pos)]) = param;
+	*payload_pos += sizeof(uint16_t);
 }
 
-static __always_inline void push__u32(u8 *data, u64 *payload_pos, u32 param)
+static __always_inline void push__u32(uint8_t *data, uint64_t *payload_pos, uint32_t param)
 {
-	*((u32 *)&data[SAFE_ACCESS(*payload_pos)]) = param;
-	*payload_pos += sizeof(u32);
+	*((uint32_t *)&data[SAFE_ACCESS(*payload_pos)]) = param;
+	*payload_pos += sizeof(uint32_t);
 }
 
-static __always_inline void push__u64(u8 *data, u64 *payload_pos, u64 param)
+static __always_inline void push__u64(uint8_t *data, uint64_t *payload_pos, uint64_t param)
 {
-	*((u64 *)&data[SAFE_ACCESS(*payload_pos)]) = param;
-	*payload_pos += sizeof(u64);
+	*((uint64_t *)&data[SAFE_ACCESS(*payload_pos)]) = param;
+	*payload_pos += sizeof(uint64_t);
 }
 
-static __always_inline void push__s16(u8 *data, u64 *payload_pos, s16 param)
+static __always_inline void push__s16(uint8_t *data, uint64_t *payload_pos, int16_t param)
 {
-	*((s16 *)&data[SAFE_ACCESS(*payload_pos)]) = param;
-	*payload_pos += sizeof(s16);
+	*((int16_t *)&data[SAFE_ACCESS(*payload_pos)]) = param;
+	*payload_pos += sizeof(int16_t);
 }
 
-static __always_inline void push__s32(u8 *data, u64 *payload_pos, s32 param)
+static __always_inline void push__s32(uint8_t *data, uint64_t *payload_pos, int32_t param)
 {
-	*((s32 *)&data[SAFE_ACCESS(*payload_pos)]) = param;
-	*payload_pos += sizeof(s32);
+	*((int32_t *)&data[SAFE_ACCESS(*payload_pos)]) = param;
+	*payload_pos += sizeof(int32_t);
 }
 
-static __always_inline void push__s64(u8 *data, u64 *payload_pos, s64 param)
+static __always_inline void push__s64(uint8_t *data, uint64_t *payload_pos, int64_t param)
 {
-	*((s64 *)&data[SAFE_ACCESS(*payload_pos)]) = param;
-	*payload_pos += sizeof(s64);
+	*((int64_t *)&data[SAFE_ACCESS(*payload_pos)]) = param;
+	*payload_pos += sizeof(int64_t);
 }
 
-static __always_inline void push__ipv6(u8 *data, u64 *payload_pos, u32 ipv6[4])
+static __always_inline void push__ipv6(uint8_t *data, uint64_t *payload_pos, uint32_t ipv6[4])
 {
 	__builtin_memcpy(&data[SAFE_ACCESS(*payload_pos)], ipv6, 16);
 	*payload_pos += 16;
 }
 
-static __always_inline void push__new_character(u8 *data, u64 *payload_pos, char character)
+static __always_inline void push__new_character(uint8_t *data, uint64_t *payload_pos, char character)
 {
 	*((char *)&data[SAFE_ACCESS(*payload_pos)]) = character;
 	*payload_pos += sizeof(char);
@@ -192,7 +193,7 @@ static __always_inline void push__new_character(u8 *data, u64 *payload_pos, char
  * a previous character. Since we overwrite it we don't need to update
  * `payload_pos`.
  */
-static __always_inline void push__previous_character(u8 *data, u64 *payload_pos, char character)
+static __always_inline void push__previous_character(uint8_t *data, uint64_t *payload_pos, char character)
 {
 	*((char *)&data[SAFE_ACCESS(*payload_pos - 1)]) = character;
 }
@@ -213,9 +214,9 @@ static __always_inline void push__previous_character(u8 *data, u64 *payload_pos,
  * @param charbuf_pointer pointer to the charbuf.
  * @param limit maximum number of bytes that we read in case we don't find a `\0`
  * @param mem tell where it must read: user-space or kernel-space.
- * @return (u16) the number of bytes written in the buffer. Could be '0' if the passed pointer is not valid.
+ * @return (uint16_t) the number of bytes written in the buffer. Could be '0' if the passed pointer is not valid.
  */
-static __always_inline u16 push__charbuf(u8 *data, u64 *payload_pos, unsigned long charbuf_pointer, u16 limit, enum read_memory mem)
+static __always_inline uint16_t push__charbuf(uint8_t *data, uint64_t *payload_pos, unsigned long charbuf_pointer, uint16_t limit, enum read_memory mem)
 {
 	int written_bytes = 0;
 
@@ -238,7 +239,7 @@ static __always_inline u16 push__charbuf(u8 *data, u64 *payload_pos, unsigned lo
 	}
 
 	*payload_pos += written_bytes;
-	return (u16)written_bytes;
+	return (uint16_t)written_bytes;
 }
 
 /**
@@ -255,9 +256,9 @@ static __always_inline u16 push__charbuf(u8 *data, u64 *payload_pos, unsigned lo
  * @param bytebuf_pointer pointer to the bytebuf.
  * @param len_to_read bytes that we need to read from the pointer.
  * @param mem from which memory we need to read: user-space or kernel-space.
- * @return (u16) the number of bytes written in the buffer. Could be '0' if the passed pointer is not valid.
+ * @return (uint16_t) the number of bytes written in the buffer. Could be '0' if the passed pointer is not valid.
  */
-static __always_inline u16 push__bytebuf(u8 *data, u64 *payload_pos, unsigned long bytebuf_pointer, u16 len_to_read, enum read_memory mem)
+static __always_inline uint16_t push__bytebuf(uint8_t *data, uint64_t *payload_pos, unsigned long bytebuf_pointer, uint16_t len_to_read, enum read_memory mem)
 {
 	if(mem == KERNEL)
 	{

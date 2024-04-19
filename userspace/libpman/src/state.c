@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +25,33 @@ limitations under the License.
 
 struct internal_state g_state = {};
 
+static void log_msg(enum falcosecurity_log_severity level, const char* fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+
+	if(g_state.log_fn != NULL)
+	{
+		char buf[MAX_ERROR_MESSAGE_LEN];
+		vsnprintf(buf, sizeof(buf), fmt, args);
+		g_state.log_fn("libpman", buf, level);
+	}
+	else
+	{
+		fprintf(stderr, "libpman: ");
+		vfprintf(stderr, fmt, args);
+		fprintf(stderr, "\n");
+	}
+
+	va_end(args);
+}
+
 void pman_print_error(const char* error_message)
+{
+	pman_print_msg(FALCOSECURITY_LOG_SEV_ERROR, error_message);
+}
+
+void pman_print_msg(enum falcosecurity_log_severity level, const char* error_message)
 {
 	if(!error_message)
 	{
@@ -40,19 +67,11 @@ void pman_print_error(const char* error_message)
 		 * and it is extremely confusing. Avoid that by having a special case
 		 * for this error code.
 		 */
-		if (errno == ESRCH)
-		{
-			fprintf(stderr, "libpman: %s (errno: %d | message: %s)\n",
-					error_message, errno, "Object not found");
-		}
-		else
-		{
-			fprintf(stderr, "libpman: %s (errno: %d | message: %s)\n",
-					error_message, errno, strerror(errno));
-		}
+		const char* err_str = (errno == ESRCH) ? "Object not found" : strerror(errno);
+		log_msg(level, "%s (errno: %d | message: %s)", error_message, errno, err_str);
 	}
 	else
 	{
-		fprintf(stderr, "libpman: %s\n", error_message);
+		log_msg(level, "%s", error_message);
 	}
 }

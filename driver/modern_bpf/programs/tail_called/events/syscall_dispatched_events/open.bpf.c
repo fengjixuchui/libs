@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -29,7 +30,7 @@ int BPF_PROG(open_e,
 	auxmap__store_charbuf_param(auxmap, name_pointer, MAX_PATH, USER);
 
 	/* Parameter 2: flags (type: PT_FLAGS32) */
-	u32 flags = (u32)extract__syscall_argument(regs, 1);
+	uint32_t flags = (uint32_t)extract__syscall_argument(regs, 1);
 	auxmap__store_u32_param(auxmap, open_flags_to_scap(flags));
 
 	/* Parameter 3: mode (type: PT_UINT32) */
@@ -72,15 +73,18 @@ int BPF_PROG(open_x,
 	auxmap__store_charbuf_param(auxmap, name_pointer, MAX_PATH, USER);
 
 	/* Parameter 3: flags (type: PT_FLAGS32) */
-	u32 flags = (u32)extract__syscall_argument(regs, 1);
-	auxmap__store_u32_param(auxmap, open_flags_to_scap(flags));
+	uint32_t flags = (uint32_t)extract__syscall_argument(regs, 1);
+	uint32_t scap_flags = (uint32_t)open_flags_to_scap(flags);
+	/* update scap flags if file is created */
+	scap_flags |= extract__fmode_created_from_fd(ret);
+	auxmap__store_u32_param(auxmap, scap_flags);
 
 	/* Parameter 4: mode (type: PT_UINT32) */
 	unsigned long mode = extract__syscall_argument(regs, 2);
 	auxmap__store_u32_param(auxmap, open_modes_to_scap(flags, mode));
 
 	dev_t dev = 0;
-	u64 ino = 0;
+	uint64_t ino = 0;
 
 	if(ret > 0)
 	{

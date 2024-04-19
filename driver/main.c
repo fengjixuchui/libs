@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -11,14 +12,7 @@ or GPL2.txt for full copies of the license.
 
 #include <linux/version.h>
 #include <trace/syscall.h>
-
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 20)
-#include <linux/kobject.h>
-#include <trace/sched.h>
-#include "ppm_syscall.h"
-#else
 #include <asm/syscall.h>
-#endif /* LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 20) */
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 37))
 #include <asm/atomic.h>
@@ -54,12 +48,15 @@ or GPL2.txt for full copies of the license.
 #include "ppm_ringbuffer.h"
 #include "ppm_events_public.h"
 #include "ppm_events.h"
+#include "ppm_version.h"
 #include "ppm.h"
 #include "ppm_tp.h"
 
+#include "socketcall_to_syscall.h"
+
 #define __NR_ia32_socketcall 102
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("the Falco authors");
 
 #if defined(CAPTURE_SCHED_PROC_EXEC) && (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0))
@@ -98,14 +95,16 @@ struct ppm_device {
 
 struct event_data_t {
 	enum ppm_capture_category category;
-	int socketcall_syscall;
 	bool compat;
-
+	/* We need this when we preload syscall params */
+	bool extract_socketcall_params;
+	// notify record_event_consumer that it must skip syscalls of interest check.
+	// used when we were not able to extract a syscall_id from socketcall; instead we extracted a PPME event as a fallback.
+	bool deny_syscalls_filtering;
 	union {
 		struct {
 			struct pt_regs *regs;
 			long id;
-			const struct syscall_evt_pair *cur_g_syscall_table;
 		} syscall_data;
 
 		struct {
@@ -140,7 +139,7 @@ struct event_data_t {
  */
 static int ppm_open(struct inode *inode, struct file *filp);
 static int ppm_release(struct inode *inode, struct file *filp);
-static int force_tp_set(struct ppm_consumer_t *consumer, u32 new_tp_set);
+static int force_tp_set(struct ppm_consumer_t *consumer, uint32_t new_tp_set);
 static long ppm_ioctl(struct file *f, unsigned int cmd, unsigned long arg);
 static int ppm_mmap(struct file *filp, struct vm_area_struct *vma);
 static int record_event_consumer(struct ppm_consumer_t *consumer,
@@ -195,11 +194,12 @@ TRACEPOINT_PROBE(sched_proc_fork_probe, struct task_struct *parent, struct task_
 TRACEPOINT_PROBE(sched_proc_exec_probe, struct task_struct *p, pid_t old_pid, struct linux_binprm *bprm);
 #endif
 
+extern const int g_ia32_64_map[];
+
 static struct ppm_device *g_ppm_devs;
 static struct class *g_ppm_class;
 static unsigned int g_ppm_numdevs;
 static int g_ppm_major;
-bool g_tracers_enabled = false;
 static DEFINE_PER_CPU(long, g_n_tracepoint_hit);
 static const struct file_operations g_ppm_fops = {
 	.open = ppm_open,
@@ -216,8 +216,8 @@ static const struct file_operations g_ppm_fops = {
 
 LIST_HEAD(g_consumer_list);
 static DEFINE_MUTEX(g_consumer_mutex);
-static u32 g_tracepoints_attached; // list of attached tracepoints; bitmask using ppm_tp.h enum
-static u32 g_tracepoints_refs[KMOD_PROG_ATTACHED_MAX];
+static uint32_t g_tracepoints_attached; // list of attached tracepoints; bitmask using ppm_tp.h enum
+static uint32_t g_tracepoints_refs[KMOD_PROG_ATTACHED_MAX];
 static unsigned long g_buffer_bytes_dim = DEFAULT_BUFFER_BYTES_DIM; // dimension of a single per-CPU buffer in bytes.
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
 static struct tracepoint *tp_sys_enter;
@@ -277,6 +277,7 @@ static inline nanoseconds ppm_nsecs(void)
 #endif
 }
 
+/* Fetches 6 arguments of the system call */
 inline void ppm_syscall_get_arguments(struct task_struct *task, struct pt_regs *regs, unsigned long *args)
 {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0))
@@ -305,7 +306,7 @@ static void compat_unregister_trace(void *func, const char *probename, struct tr
 #endif
 }
 
-static void set_consumer_tracepoints(struct ppm_consumer_t *consumer, u32 tp_set)
+static void set_consumer_tracepoints(struct ppm_consumer_t *consumer, uint32_t tp_set)
 {
 	int i;
 	int bits_processed;
@@ -579,7 +580,7 @@ static int ppm_release(struct inode *inode, struct file *filp)
 		goto cleanup_release;
 	}
 
-	vpr_info("closing ring %d, consumer:%p evt:%llu, dr_buf:%llu, dr_buf_clone_fork_e:%llu, dr_buf_clone_fork_x:%llu, dr_buf_execve_e:%llu, dr_buf_execve_x:%llu, dr_buf_connect_e:%llu, dr_buf_connect_x:%llu, dr_buf_open_e:%llu, dr_buf_open_x:%llu, dr_buf_dir_file_e:%llu, dr_buf_dir_file_x:%llu, dr_buf_other_e:%llu, dr_buf_other_x:%llu, dr_pf:%llu, pr:%llu, cs:%llu\n",
+	vpr_info("closing ring %d, consumer:%p evt:%llu, dr_buf:%llu, dr_buf_clone_fork_e:%llu, dr_buf_clone_fork_x:%llu, dr_buf_execve_e:%llu, dr_buf_execve_x:%llu, dr_buf_connect_e:%llu, dr_buf_connect_x:%llu, dr_buf_open_e:%llu, dr_buf_open_x:%llu, dr_buf_dir_file_e:%llu, dr_buf_dir_file_x:%llu, dr_buf_other_e:%llu, dr_buf_other_x:%llu, dr_buf_close_exit:%llu, dr_buf_proc_exit:%llu, dr_pf:%llu, pr:%llu, cs:%llu\n",
 	       ring_no,
 	       consumer_id,
 	       ring->info->n_evts,
@@ -596,6 +597,8 @@ static int ppm_release(struct inode *inode, struct file *filp)
 	       ring->info->n_drops_buffer_dir_file_exit,
 	       ring->info->n_drops_buffer_other_interest_enter,
 	       ring->info->n_drops_buffer_other_interest_exit,
+	       ring->info->n_drops_buffer_close_exit,	
+	       ring->info->n_drops_buffer_proc_exit,
 	       ring->info->n_drops_pf,
 	       ring->info->n_preemptions,
 	       ring->info->n_context_switches);
@@ -626,11 +629,11 @@ static int compat_set_tracepoint(void *func, const char *probename, struct trace
 	return ret;
 }
 
-static int force_tp_set(struct ppm_consumer_t *consumer, u32 new_tp_set)
+static int force_tp_set(struct ppm_consumer_t *consumer, uint32_t new_tp_set)
 {
-	u32 idx;
-	u32 new_val;
-	u32 curr_val;
+	uint32_t idx;
+	uint32_t new_val;
+	uint32_t curr_val;
 	int cpu;
 	int ret;
 
@@ -790,9 +793,9 @@ static long ppm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (cmd == PPM_IOCTL_GET_PROCLIST) {
 		struct ppm_proclist_info *proclist_info = NULL;
 		struct task_struct *p, *t;
-		u64 nentries = 0;
+		uint64_t nentries = 0;
 		struct ppm_proclist_info pli;
-		u32 memsize;
+		uint32_t memsize;
 
 		if (copy_from_user(&pli, (void *)arg, sizeof(pli))) {
 			ret = -EINVAL;
@@ -835,7 +838,7 @@ static long ppm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0))
 					cputime_t utime, stime;
 #else
-					u64 utime, stime;
+					uint64_t utime, stime;
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
@@ -953,12 +956,12 @@ cleanup_ioctl_procinfo:
 	}
 	case PPM_IOCTL_ENABLE_DROPPING_MODE:
 	{
-		u32 new_sampling_ratio;
+		uint32_t new_sampling_ratio;
 
 		consumer->dropping_mode = 1;
 		vpr_info("PPM_IOCTL_ENABLE_DROPPING_MODE, consumer %p\n", consumer_id);
 
-		new_sampling_ratio = (u32)arg;
+		new_sampling_ratio = (uint32_t)arg;
 
 		if (new_sampling_ratio != 1 &&
 			new_sampling_ratio != 2 &&
@@ -983,10 +986,10 @@ cleanup_ioctl_procinfo:
 	}
 	case PPM_IOCTL_SET_SNAPLEN:
 	{
-		u32 new_snaplen;
+		uint32_t new_snaplen;
 
 		vpr_info("PPM_IOCTL_SET_SNAPLEN, consumer %p\n", consumer_id);
-		new_snaplen = (u32)arg;
+		new_snaplen = (uint32_t)arg;
 
 		if (new_snaplen > SNAPLEN_MAX) {
 			pr_err("invalid snaplen %u\n", new_snaplen);
@@ -1003,10 +1006,10 @@ cleanup_ioctl_procinfo:
 	}
 	case PPM_IOCTL_SET_FULLCAPTURE_PORT_RANGE:
 	{
-		u32 encoded_port_range;
+		uint32_t encoded_port_range;
 
 		vpr_info("PPM_IOCTL_SET_FULLCAPTURE_PORT_RANGE, consumer %p\n", consumer_id);
-		encoded_port_range = (u32)arg;
+		encoded_port_range = (uint32_t)arg;
 
 		consumer->fullcapture_port_range_start = encoded_port_range & 0xFFFF;
 		consumer->fullcapture_port_range_end = encoded_port_range >> 16;
@@ -1019,7 +1022,7 @@ cleanup_ioctl_procinfo:
 	}
 	case PPM_IOCTL_SET_STATSD_PORT:
 	{
-		consumer->statsd_port = (u16)arg;
+		consumer->statsd_port = (uint16_t)arg;
 
 		pr_info("new statsd_port: %d\n", (int)consumer->statsd_port);
 
@@ -1028,7 +1031,7 @@ cleanup_ioctl_procinfo:
 	}
 	case PPM_IOCTL_ENABLE_SYSCALL:
 	{
-		u32 syscall_to_set = (u32)arg - SYSCALL_TABLE_ID0;
+		uint32_t syscall_to_set = (uint32_t)arg - SYSCALL_TABLE_ID0;
 
 		vpr_info("PPM_IOCTL_ENABLE_SYSCALL (%u), consumer %p\n", syscall_to_set, consumer_id);
 
@@ -1045,7 +1048,7 @@ cleanup_ioctl_procinfo:
 	}
 	case PPM_IOCTL_DISABLE_SYSCALL:
 	{
-		u32 syscall_to_unset = (u32)arg - SYSCALL_TABLE_ID0;
+		uint32_t syscall_to_unset = (uint32_t)arg - SYSCALL_TABLE_ID0;
 
 		vpr_info("PPM_IOCTL_DISABLE_SYSCALL (%u), consumer %p\n", syscall_to_unset, consumer_id);
 
@@ -1123,37 +1126,30 @@ cleanup_ioctl_procinfo:
 		ret = task_tgid_nr(current);
 		goto cleanup_ioctl;
 #endif /* LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20) */
-	case PPM_IOCTL_SET_TRACERS_CAPTURE:
-	{
-		vpr_info("PPM_IOCTL_SET_TRACERS_CAPTURE, consumer %p\n", consumer_id);
-		g_tracers_enabled = true;
-		ret = 0;
-		goto cleanup_ioctl;
-	}
 	case PPM_IOCTL_ENABLE_TP:
 	{
-		u32 new_tp_set;
-		if ((u32)arg >= KMOD_PROG_ATTACHED_MAX) {
-			pr_err("invalid tp %u\n", (u32)arg);
+		uint32_t new_tp_set;
+		if ((uint32_t)arg >= KMOD_PROG_ATTACHED_MAX) {
+			pr_err("invalid tp %u\n", (uint32_t)arg);
 			ret = -EINVAL;
 			goto cleanup_ioctl;
 		}
 		new_tp_set = consumer->tracepoints_attached;
-		new_tp_set |= 1 << (u32)arg;
+		new_tp_set |= 1 << (uint32_t)arg;
 		set_consumer_tracepoints(consumer, new_tp_set);
 		ret = 0;
 		goto cleanup_ioctl;
 	}
 	case PPM_IOCTL_DISABLE_TP:
 	{
-		u32 new_tp_set;
-		if ((u32)arg >= KMOD_PROG_ATTACHED_MAX) {
-			pr_err("invalid tp %u\n", (u32)arg);
+		uint32_t new_tp_set;
+		if ((uint32_t)arg >= KMOD_PROG_ATTACHED_MAX) {
+			pr_err("invalid tp %u\n", (uint32_t)arg);
 			ret = -EINVAL;
 			goto cleanup_ioctl;
 		}
 		new_tp_set = consumer->tracepoints_attached;
-		new_tp_set &= ~(1 << (u32)arg);
+		new_tp_set &= ~(1 << (uint32_t)arg);
 		set_consumer_tracepoints(consumer, new_tp_set);
 		ret = 0;
 		goto cleanup_ioctl;
@@ -1356,94 +1352,97 @@ static const unsigned char compat_nas[21] = {
 #endif
 
 
-#ifdef _HAS_SOCKETCALL
-static ppm_event_code parse_socketcall(struct event_filler_arguments *filler_args, struct pt_regs *regs)
+/* This method is just a pass-through to avoid exporting
+ * `ppm_syscall_get_arguments` outside of `main.c`
+ */
+static long convert_network_syscalls(struct pt_regs *regs, bool* is_syscall_return)
 {
+	/* Here we extract just the first parameter of the socket call */
 	unsigned long __user args[6] = {};
-	unsigned long __user *scargs;
-	int socketcall_id;
 	ppm_syscall_get_arguments(current, regs, args);
-	socketcall_id = args[0];
-	scargs = (unsigned long __user *)args[1];
 
-	if (unlikely(socketcall_id < SYS_SOCKET ||
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0)
-		socketcall_id > SYS_SENDMMSG))
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 33)
-		socketcall_id > SYS_RECVMMSG))
-#else
-		socketcall_id > SYS_ACCEPT4))
-#endif
-		return PPME_GENERIC_E;
+	/* args[0] is the specific socket call code */
+	return socketcall_code_to_syscall_code(args[0], is_syscall_return);
+}
+
+static int load_socketcall_params(struct event_filler_arguments *filler_args)
+{
+	unsigned long __user original_socketcall_args[6] = {};
+	unsigned long __user pointer_real_args = 0;
+	int socketcall_id;
+	ppm_syscall_get_arguments(current, filler_args->regs, original_socketcall_args);
+	socketcall_id = original_socketcall_args[0];
+	pointer_real_args = original_socketcall_args[1];
 
 #ifdef CONFIG_COMPAT
-	if (unlikely(filler_args->compat)) {
+	if (unlikely(filler_args->compat))
+	{
 		compat_ulong_t socketcall_args32[6];
 		int j;
 
-		if (unlikely(ppm_copy_from_user(socketcall_args32, compat_ptr(args[1]), compat_nas[socketcall_id])))
-			return PPME_GENERIC_E;
+		if (unlikely(ppm_copy_from_user(socketcall_args32, compat_ptr((compat_uptr_t)pointer_real_args), compat_nas[socketcall_id])))
+			return -1;
 		for (j = 0; j < 6; ++j)
-			filler_args->socketcall_args[j] = (unsigned long)socketcall_args32[j];
-	} else {
+			filler_args->args[j] = (unsigned long)socketcall_args32[j];
+	}
+	else
+	{
 #endif
-		if (unlikely(ppm_copy_from_user(filler_args->socketcall_args, scargs, nas[socketcall_id])))
-			return PPME_GENERIC_E;
+		if (unlikely(ppm_copy_from_user(filler_args->args, (unsigned long __user*)pointer_real_args, nas[socketcall_id])))
+			return -1;
 #ifdef CONFIG_COMPAT
 	}
 #endif
-
-	switch (socketcall_id) {
-	case SYS_SOCKET:
-		return PPME_SOCKET_SOCKET_E;
-	case SYS_BIND:
-		return PPME_SOCKET_BIND_E;
-	case SYS_CONNECT:
-		return PPME_SOCKET_CONNECT_E;
-	case SYS_LISTEN:
-		return PPME_SOCKET_LISTEN_E;
-	case SYS_ACCEPT:
-		return PPME_SOCKET_ACCEPT_5_E;
-	case SYS_GETSOCKNAME:
-		return PPME_SOCKET_GETSOCKNAME_E;
-	case SYS_GETPEERNAME:
-		return PPME_SOCKET_GETPEERNAME_E;
-	case SYS_SOCKETPAIR:
-		return PPME_SOCKET_SOCKETPAIR_E;
-	case SYS_SEND:
-		return PPME_SOCKET_SEND_E;
-	case SYS_SENDTO:
-		return PPME_SOCKET_SENDTO_E;
-	case SYS_RECV:
-		return PPME_SOCKET_RECV_E;
-	case SYS_RECVFROM:
-		return PPME_SOCKET_RECVFROM_E;
-	case SYS_SHUTDOWN:
-		return PPME_SOCKET_SHUTDOWN_E;
-	case SYS_SETSOCKOPT:
-		return PPME_SOCKET_SETSOCKOPT_E;
-	case SYS_GETSOCKOPT:
-		return PPME_SOCKET_GETSOCKOPT_E;
-	case SYS_SENDMSG:
-		return PPME_SOCKET_SENDMSG_E;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0)
-	case SYS_SENDMMSG:
-		return PPME_SOCKET_SENDMMSG_E;
-#endif
-	case SYS_RECVMSG:
-		return PPME_SOCKET_RECVMSG_E;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 33)
-	case SYS_RECVMMSG:
-		return PPME_SOCKET_RECVMMSG_E;
-#endif
-	case SYS_ACCEPT4:
-		return PPME_SOCKET_ACCEPT4_6_E;
-	default:
-		ASSERT(false);
-		return PPME_GENERIC_E;
-	}
+	return 0;
 }
-#endif /* _HAS_SOCKETCALL */
+
+static inline struct event_data_t *manage_socketcall(struct event_data_t *event_data, int socketcall_syscall_id, bool is_exit)
+{
+	bool is_syscall_return;
+	int return_code = convert_network_syscalls(event_data->event_info.syscall_data.regs, &is_syscall_return);
+	if (return_code == -1)
+	{
+		// Wrong SYS_ argument passed. Drop the syscall.
+		return NULL;
+	}
+
+
+	/* If the return code is not the generic event we will need to extract parameters
+	 * with the socket call mechanism.
+	 */
+	event_data->extract_socketcall_params = true;
+
+	/* If we return an event code, it means we need to call directly `record_event_all_consumers` */
+	if(!is_syscall_return)
+	{
+		// We need to skip the syscall filtering logic because
+		// the actual `id` is no longer representative for this event.
+		// There could be cases in which we have a `PPME_SOCKET_SEND_E` event
+		// and`id=__NR_ia32_socketcall`...We resolved the correct event type but we cannot
+		// update the `id`.
+		event_data->deny_syscalls_filtering = true;
+		/* we need to use `return_code + 1` because return_code
+		 * is the enter event.
+		 */
+		record_event_all_consumers(return_code + is_exit, UF_USED,
+					   event_data, is_exit ? KMOD_PROG_SYS_EXIT : KMOD_PROG_SYS_ENTER);
+		return NULL; // managed
+	}
+
+	/* If we return a syscall id we just set it */
+	event_data->event_info.syscall_data.id = return_code;
+	return event_data;
+}
+
+static int preload_params(struct event_filler_arguments *filler_args, bool extract_socketcall_params)
+{
+	if (extract_socketcall_params)
+	{
+		return load_socketcall_params(filler_args);
+	}
+	ppm_syscall_get_arguments(current, filler_args->regs, filler_args->args);
+	return 0;
+}
 
 static inline void record_drop_e(struct ppm_consumer_t *consumer,
                                  nanoseconds ns,
@@ -1455,7 +1454,9 @@ static inline void record_drop_e(struct ppm_consumer_t *consumer,
 		consumer->need_to_insert_drop_e = 1;
 	} else {
 		if (consumer->need_to_insert_drop_e == 1 && !(drop_flags & UF_ATOMIC)) {
-			pr_err("drop enter event delayed insert\n");
+			if (verbose) {
+				pr_err("consumer:%p drop enter event delayed insert\n", consumer->consumer_id);
+			}
 		}
 
 		consumer->need_to_insert_drop_e = 0;
@@ -1469,7 +1470,6 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	// enter
 	case PPME_SYSCALL_OPEN_E:
 	case PPME_SYSCALL_CREAT_E:
-	case PPME_SYSCALL_OPENAT_E:
 	case PPME_SYSCALL_OPENAT_2_E:
 	case PPME_SYSCALL_OPENAT2_E:
 	case PPME_SYSCALL_OPEN_BY_HANDLE_AT_E:
@@ -1483,38 +1483,26 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SYSCALL_LCHOWN_E:
 	case PPME_SYSCALL_FCHOWN_E:
 	case PPME_SYSCALL_FCHOWNAT_E:
-	case PPME_SYSCALL_LINK_E:
 	case PPME_SYSCALL_LINK_2_E:
-	case PPME_SYSCALL_LINKAT_E:
 	case PPME_SYSCALL_LINKAT_2_E:
-	case PPME_SYSCALL_MKDIR_E:
 	case PPME_SYSCALL_MKDIR_2_E:
 	case PPME_SYSCALL_MKDIRAT_E:
 	case PPME_SYSCALL_MOUNT_E:
-	case PPME_SYSCALL_UMOUNT_E:
 	case PPME_SYSCALL_UMOUNT_1_E:
 	case PPME_SYSCALL_UMOUNT2_E:
 	case PPME_SYSCALL_RENAME_E:
 	case PPME_SYSCALL_RENAMEAT_E:
 	case PPME_SYSCALL_RENAMEAT2_E:
-	case PPME_SYSCALL_RMDIR_E:
 	case PPME_SYSCALL_RMDIR_2_E:
 	case PPME_SYSCALL_SYMLINK_E:
 	case PPME_SYSCALL_SYMLINKAT_E:
-	case PPME_SYSCALL_UNLINK_E:
 	case PPME_SYSCALL_UNLINK_2_E:
-	case PPME_SYSCALL_UNLINKAT_E:
 	case PPME_SYSCALL_UNLINKAT_2_E:
 		ring_info->n_drops_buffer_dir_file_enter++;
 		break;
-	case PPME_SYSCALL_CLONE_11_E:
-	case PPME_SYSCALL_CLONE_16_E:
-	case PPME_SYSCALL_CLONE_17_E:
 	case PPME_SYSCALL_CLONE_20_E:
 	case PPME_SYSCALL_CLONE3_E:
-	case PPME_SYSCALL_FORK_E:
 	case PPME_SYSCALL_FORK_20_E:
-	case PPME_SYSCALL_VFORK_E:
 	case PPME_SYSCALL_VFORK_20_E:
 		ring_info->n_drops_buffer_clone_fork_enter++;
 		break;
@@ -1525,7 +1513,6 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SOCKET_CONNECT_E:
 		ring_info->n_drops_buffer_connect_enter++;
 		break;
-	case PPME_SYSCALL_BPF_E:
 	case PPME_SYSCALL_BPF_2_E:
 	case PPME_SYSCALL_SETPGID_E:
 	case PPME_SYSCALL_PTRACE_E:
@@ -1538,10 +1525,12 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SYSCALL_CAPSET_E:
 		ring_info->n_drops_buffer_other_interest_enter++;
 		break;
+	case PPME_PROCEXIT_1_E:
+		ring_info->n_drops_buffer_proc_exit++;
+		break;			
 	// exit
 	case PPME_SYSCALL_OPEN_X:
 	case PPME_SYSCALL_CREAT_X:
-	case PPME_SYSCALL_OPENAT_X:
 	case PPME_SYSCALL_OPENAT_2_X:
 	case PPME_SYSCALL_OPENAT2_X:
 	case PPME_SYSCALL_OPEN_BY_HANDLE_AT_X:
@@ -1555,38 +1544,26 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SYSCALL_LCHOWN_X:
 	case PPME_SYSCALL_FCHOWN_X:
 	case PPME_SYSCALL_FCHOWNAT_X:
-	case PPME_SYSCALL_LINK_X:
 	case PPME_SYSCALL_LINK_2_X:
-	case PPME_SYSCALL_LINKAT_X:
 	case PPME_SYSCALL_LINKAT_2_X:
-	case PPME_SYSCALL_MKDIR_X:
 	case PPME_SYSCALL_MKDIR_2_X:
 	case PPME_SYSCALL_MKDIRAT_X:
 	case PPME_SYSCALL_MOUNT_X:
-	case PPME_SYSCALL_UMOUNT_X:
 	case PPME_SYSCALL_UMOUNT_1_X:
 	case PPME_SYSCALL_UMOUNT2_X:
 	case PPME_SYSCALL_RENAME_X:
 	case PPME_SYSCALL_RENAMEAT_X:
 	case PPME_SYSCALL_RENAMEAT2_X:
-	case PPME_SYSCALL_RMDIR_X:
 	case PPME_SYSCALL_RMDIR_2_X:
 	case PPME_SYSCALL_SYMLINK_X:
 	case PPME_SYSCALL_SYMLINKAT_X:
-	case PPME_SYSCALL_UNLINK_X:
 	case PPME_SYSCALL_UNLINK_2_X:
-	case PPME_SYSCALL_UNLINKAT_X:
 	case PPME_SYSCALL_UNLINKAT_2_X:
 		ring_info->n_drops_buffer_dir_file_exit++;
 		break;
-	case PPME_SYSCALL_CLONE_11_X:
-	case PPME_SYSCALL_CLONE_16_X:
-	case PPME_SYSCALL_CLONE_17_X:
 	case PPME_SYSCALL_CLONE_20_X:
 	case PPME_SYSCALL_CLONE3_X:
-	case PPME_SYSCALL_FORK_X:
 	case PPME_SYSCALL_FORK_20_X:
-	case PPME_SYSCALL_VFORK_X:
 	case PPME_SYSCALL_VFORK_20_X:
 		ring_info->n_drops_buffer_clone_fork_exit++;
 		break;
@@ -1597,7 +1574,6 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SOCKET_CONNECT_X:
 		ring_info->n_drops_buffer_connect_exit++;
 		break;
-	case PPME_SYSCALL_BPF_X:
 	case PPME_SYSCALL_BPF_2_X:
 	case PPME_SYSCALL_SETPGID_X:
 	case PPME_SYSCALL_PTRACE_X:
@@ -1609,6 +1585,9 @@ static inline void drops_buffer_syscall_categories_counters(ppm_event_code event
 	case PPME_SYSCALL_UNSHARE_X:
 	case PPME_SYSCALL_CAPSET_X:
 		ring_info->n_drops_buffer_other_interest_exit++;
+		break;
+	case PPME_SYSCALL_CLOSE_X:
+		ring_info->n_drops_buffer_close_exit++;
 		break;
 	default:
 		break;
@@ -1625,7 +1604,9 @@ static inline void record_drop_x(struct ppm_consumer_t *consumer,
 		consumer->need_to_insert_drop_x = 1;
 	} else {
 		if (consumer->need_to_insert_drop_x == 1 && !(drop_flags & UF_ATOMIC)) {
-			pr_err("drop exit event delayed insert\n");
+			if (verbose) {
+				pr_err("consumer:%p drop exit event delayed insert\n", consumer->consumer_id);
+			}
 		}
 
 		consumer->need_to_insert_drop_x = 0;
@@ -1769,12 +1750,12 @@ static int record_event_consumer(struct ppm_consumer_t *consumer,
 	int res = 0;
 	size_t event_size = 0;
 	int next;
-	u32 freespace;
-	u32 usedspace;
-	u32 delta_from_end;
+	uint32_t freespace;
+	uint32_t usedspace;
+	uint32_t delta_from_end;
 	struct event_filler_arguments args = {};
-	u32 ttail;
-	u32 head;
+	uint32_t ttail;
+	uint32_t head;
 	struct ppm_ring_buffer_context *ring;
 	struct ppm_ring_buffer_info *ring_info;
 	int drop = 1;
@@ -1789,12 +1770,15 @@ static int record_event_consumer(struct ppm_consumer_t *consumer,
 	}
 
 	// Check if syscall is interesting for the consumer
-	if (event_datap->category == PPMC_SYSCALL && event_datap->event_info.syscall_data.id != event_datap->socketcall_syscall)
+	if (event_datap->category == PPMC_SYSCALL)
 	{
-		table_index = event_datap->event_info.syscall_data.id - SYSCALL_TABLE_ID0;
-		if (!test_bit(table_index, consumer->syscalls_mask))
+		if (!event_datap->deny_syscalls_filtering)
 		{
-			return res;
+			table_index = event_datap->event_info.syscall_data.id - SYSCALL_TABLE_ID0;
+			if(!test_bit(table_index, consumer->syscalls_mask))
+			{
+				return res;
+			}
 		}
 
 		if (tp_type == KMOD_PROG_SYS_EXIT && consumer->drop_failed)
@@ -1804,6 +1788,15 @@ static int record_event_consumer(struct ppm_consumer_t *consumer,
 			{
 				return res;
 			}
+		}
+
+		args.regs = event_datap->event_info.syscall_data.regs;
+		args.syscall_id = event_datap->event_info.syscall_data.id;
+		args.compat = event_datap->compat;
+		/* If the syscall is interesting we need to preload params */
+		if(unlikely(preload_params(&args, event_datap->extract_socketcall_params) == -1))
+		{
+			return res;
 		}
 	}
 
@@ -1882,44 +1875,13 @@ static int record_event_consumer(struct ppm_consumer_t *consumer,
 	ASSERT(head <= consumer->buffer_bytes_dim);
 	ASSERT(delta_from_end < consumer->buffer_bytes_dim + (2 * PAGE_SIZE));
 	ASSERT(delta_from_end > (2 * PAGE_SIZE) - 1);
-#ifdef _HAS_SOCKETCALL
-	/*
-	 * If this is a socketcall system call, determine the correct event type
-	 * by parsing the arguments and patch event_type accordingly
-	 * A bit of explanation: most linux architectures don't have a separate
-	 * syscall for each of the socket functions (bind, connect...). Instead,
-	 * the socket functions are aggregated into a single syscall, called
-	 * socketcall. The first socketcall argument is the call type, while the
-	 * second argument contains a pointer to the arguments of the original
-	 * call. I guess this was done to reduce the number of syscalls...
-	 */
-	if (event_datap->category == PPMC_SYSCALL && event_datap->event_info.syscall_data.regs && event_datap->event_info.syscall_data.id == event_datap->socketcall_syscall) {
-		ppm_event_code tet;
-
-		args.is_socketcall = true;
-		args.compat = event_datap->compat;
-		tet = parse_socketcall(&args, event_datap->event_info.syscall_data.regs);
-
-		if (event_type == PPME_GENERIC_E)
-			event_type = tet;
-		else
-			event_type = tet + 1;
-
-	} else {
-		args.is_socketcall = false;
-		args.compat = false;
-	}
-
-	args.socketcall_syscall = event_datap->socketcall_syscall;
-#endif
-
 	ASSERT(event_type < PPM_EVENT_MAX);
 
 	/*
 	 * Determine how many arguments this event has
 	 */
 	args.nargs = g_event_info[event_type].nparams;
-	args.arg_data_offset = args.nargs * sizeof(u16);
+	args.arg_data_offset = args.nargs * sizeof(uint16_t);
 
 	/*
 	 * Make sure we have enough space for the event header.
@@ -1950,15 +1912,10 @@ static int record_event_consumer(struct ppm_consumer_t *consumer,
 		args.buffer_size = min(freespace, delta_from_end) - sizeof(struct ppm_evt_hdr); /* freespace is guaranteed to be bigger than sizeof(struct ppm_evt_hdr) */
 		args.event_type = event_type;
 
-		if (event_datap->category == PPMC_SYSCALL) {
-			args.regs = event_datap->event_info.syscall_data.regs;
-			args.syscall_id = event_datap->event_info.syscall_data.id;
-			args.cur_g_syscall_table = event_datap->event_info.syscall_data.cur_g_syscall_table;
-			args.compat = event_datap->compat;
-		} else {
+		if(event_datap->category != PPMC_SYSCALL)
+		{
 			args.regs = NULL;
 			args.syscall_id = -1;
-			args.cur_g_syscall_table = NULL;
 			args.compat = false;
 		}
 
@@ -2112,7 +2069,7 @@ static int record_event_consumer(struct ppm_consumer_t *consumer,
 	}
 
 	if (MORE_THAN_ONE_SECOND_AHEAD(ns, ring->last_print_time + 1) && !(drop_flags & UF_ATOMIC)) {
-		vpr_info("consumer:%p CPU:%d, use:%lu%%, ev:%llu, dr_buf:%llu, dr_buf_clone_fork_e:%llu, dr_buf_clone_fork_x:%llu, dr_buf_execve_e:%llu, dr_buf_execve_x:%llu, dr_buf_connect_e:%llu, dr_buf_connect_x:%llu, dr_buf_open_e:%llu, dr_buf_open_x:%llu, dr_buf_dir_file_e:%llu, dr_buf_dir_file_x:%llu, dr_buf_other_e:%llu, dr_buf_other_x:%llu, dr_pf:%llu, pr:%llu, cs:%llu\n",
+		vpr_info("consumer:%p CPU:%d, use:%lu%%, ev:%llu, dr_buf:%llu, dr_buf_clone_fork_e:%llu, dr_buf_clone_fork_x:%llu, dr_buf_execve_e:%llu, dr_buf_execve_x:%llu, dr_buf_connect_e:%llu, dr_buf_connect_x:%llu, dr_buf_open_e:%llu, dr_buf_open_x:%llu, dr_buf_dir_file_e:%llu, dr_buf_dir_file_x:%llu, dr_buf_other_e:%llu, dr_buf_other_x:%llu, dr_buf_close_exit:%llu, dr_buf_proc_exit:%llu, dr_pf:%llu, pr:%llu, cs:%llu\n",
 			   consumer->consumer_id,
 		       smp_processor_id(),
 		       (usedspace * 100) / consumer->buffer_bytes_dim,
@@ -2130,6 +2087,8 @@ static int record_event_consumer(struct ppm_consumer_t *consumer,
 		       ring_info->n_drops_buffer_dir_file_exit,
 		       ring_info->n_drops_buffer_other_interest_enter,
 		       ring_info->n_drops_buffer_other_interest_exit,
+		       ring->info->n_drops_buffer_close_exit,
+		       ring->info->n_drops_buffer_proc_exit,
 		       ring_info->n_drops_pf,
 		       ring_info->n_preemptions,
 		       ring->info->n_context_switches);
@@ -2159,65 +2118,104 @@ static inline void g_n_tracepoint_hit_inc(void)
 #endif
 }
 
+static inline bool kmod_in_ia32_syscall(void)
+{
+#if defined(CONFIG_X86_64) && defined(CONFIG_IA32_EMULATION)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
+	if (in_ia32_syscall())
+#else
+	if (unlikely(task_thread_info(current)->status & TS_COMPAT))
+#endif
+		return true;
+#elif defined(CONFIG_ARM64)
+	if (unlikely(task_thread_info(current)->flags & _TIF_32BIT))
+		return true;
+#elif defined(CONFIG_S390)
+	if (unlikely(task_thread_info(current)->flags & _TIF_31BIT))
+		return true;
+#elif defined(CONFIG_PPC64)
+	if (unlikely(task_thread_info(current)->flags & _TIF_32BIT))
+		return true;
+#endif /* CONFIG_X86_64 */
+	return false;
+}
+
 TRACEPOINT_PROBE(syscall_enter_probe, struct pt_regs *regs, long id)
 {
-	long table_index;
-	const struct syscall_evt_pair *cur_g_syscall_table = g_syscall_table;
-	bool compat = false;
-#ifdef __NR_socketcall
-	int socketcall_syscall = __NR_socketcall;
-#else
-	int socketcall_syscall = -1;
-#endif
+	struct event_data_t event_data = {};
+	const struct syscall_evt_pair *event_pair = NULL;
+	long table_index = 0;
+	int socketcall_syscall_id = -1;
 
-#if defined(CONFIG_X86_64) && defined(CONFIG_IA32_EMULATION)
-	/*
-	 * If this is a 32bit process running on a 64bit kernel (see the CONFIG_IA32_EMULATION
-	 * kernel flag), we switch to the ia32 syscall table.
-	 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
-	if (in_ia32_syscall()) {
-#else
-	if (unlikely(task_thread_info(current)->status & TS_COMPAT)) {
-#endif
-		cur_g_syscall_table = g_syscall_ia32_table;
-		socketcall_syscall = __NR_ia32_socketcall;
-		compat = true;
+	/* Just to be extra-safe */
+	if(id < 0)
+	{
+		return;
 	}
+
+	event_data.category = PPMC_SYSCALL;
+	event_data.event_info.syscall_data.regs = regs;
+	event_data.extract_socketcall_params = false;
+
+	/* This could be overwritten if we are in a socket call */
+	event_data.event_info.syscall_data.id = id;
+	event_data.compat = false;
+
+	if(kmod_in_ia32_syscall())
+	{
+	// Right now we support 32-bit emulation only on x86.
+	// We try to convert the 32-bit id into the 64-bit one.
+#if defined(CONFIG_X86_64) && defined(CONFIG_IA32_EMULATION)
+		event_data.compat = true;
+		if (id == __NR_ia32_socketcall)
+		{
+			socketcall_syscall_id = __NR_ia32_socketcall;
+		}
+		else
+		{
+			event_data.event_info.syscall_data.id = g_ia32_64_map[id];
+			// syscalls defined only on 32 bits are dropped here.
+			if(event_data.event_info.syscall_data.id == -1)
+			{
+				return;
+			}
+		}
+#else
+		// Unsupported arch
+		return;
+#endif		
+	}
+	else
+	{
+#ifdef __NR_socketcall
+		socketcall_syscall_id = __NR_socketcall;
 #endif
+	}
 
 	g_n_tracepoint_hit_inc();
 
-	table_index = id - SYSCALL_TABLE_ID0;
-	if (likely(table_index >= 0 && table_index < SYSCALL_TABLE_SIZE)) {
-		struct event_data_t event_data;
-		int used = cur_g_syscall_table[table_index].flags & UF_USED;
-		enum syscall_flags drop_flags = cur_g_syscall_table[table_index].flags;
-		ppm_event_code type;
-
-#ifdef _HAS_SOCKETCALL
-		if (id == socketcall_syscall) {
-			used = true;
-			drop_flags = UF_NEVER_DROP;
-			type = PPME_GENERIC_E;
-		} else
-			type = cur_g_syscall_table[table_index].enter_event_type;
-#else
-		type = cur_g_syscall_table[table_index].enter_event_type;
-#endif
-
-		event_data.category = PPMC_SYSCALL;
-		event_data.event_info.syscall_data.regs = regs;
-		event_data.event_info.syscall_data.id = id;
-		event_data.event_info.syscall_data.cur_g_syscall_table = cur_g_syscall_table;
-		event_data.socketcall_syscall = socketcall_syscall;
-		event_data.compat = compat;
-
-		if (used)
-			record_event_all_consumers(type, drop_flags, &event_data, KMOD_PROG_SYS_ENTER);
-		else
-			record_event_all_consumers(PPME_GENERIC_E, UF_ALWAYS_DROP, &event_data, KMOD_PROG_SYS_ENTER);
+	// Now all syscalls on 32-bit should be converted to 64-bit apart from `socketcall`.
+	// This one deserves special treatment.
+	if(event_data.event_info.syscall_data.id == socketcall_syscall_id)
+	{
+		if(manage_socketcall(&event_data, socketcall_syscall_id, false) == NULL)
+		{
+			return;
+		}
 	}
+
+	/* We need to set here the `syscall_id` because it could change in case of socketcalls */
+	table_index = event_data.event_info.syscall_data.id - SYSCALL_TABLE_ID0;
+	if (unlikely(table_index < 0 || table_index >= SYSCALL_TABLE_SIZE))
+	{
+		return;
+	}
+
+	event_pair = &g_syscall_table[table_index];
+	if (event_pair->flags & UF_USED)
+		record_event_all_consumers(event_pair->enter_event_type, event_pair->flags, &event_data, KMOD_PROG_SYS_ENTER);
+	else
+		record_event_all_consumers(PPME_GENERIC_E, UF_ALWAYS_DROP, &event_data, KMOD_PROG_SYS_ENTER);
 }
 
 static __always_inline bool kmod_drop_syscall_exit_events(long ret, ppm_event_code evt_type)
@@ -2257,73 +2255,98 @@ static __always_inline bool kmod_drop_syscall_exit_events(long ret, ppm_event_co
 
 TRACEPOINT_PROBE(syscall_exit_probe, struct pt_regs *regs, long ret)
 {
-	int id;
-	long table_index;
-	const struct syscall_evt_pair *cur_g_syscall_table = g_syscall_table;
-	bool compat = false;
-#ifdef __NR_socketcall
-	int socketcall_syscall = __NR_socketcall;
-#else
-	int socketcall_syscall = -1;
-#endif
+	struct event_data_t event_data = {};
+	const struct syscall_evt_pair *event_pair = NULL;
+	long table_index = 0;
+	int socketcall_syscall_id = -1;
 
-	id = syscall_get_nr(current, regs);
-
-#if defined(CONFIG_X86_64) && defined(CONFIG_IA32_EMULATION)
-	/*
-	 * When a process does execve from 64bit to 32bit, TS_COMPAT is marked true
-	 * but the id of the syscall is __NR_execve, so to correctly parse it we need to
-	 * use 64bit syscall table. On 32bit __NR_execve is equal to __NR_ia32_oldolduname
-	 * which is a very old syscall, not used anymore by most applications
+	/* If @task is executing a system call or is at system call
+ 	 * tracing about to attempt one, returns the system call number.
+ 	 * If @task is not executing a system call, i.e. it's blocked
+ 	 * inside the kernel for a fault or signal, returns -1.
+	 * 
+	 * The syscall id could be overwritten if we are in a socket call.
 	 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
-	if (in_ia32_syscall() && id != __NR_execve) {
-#else
-	if (unlikely((task_thread_info(current)->status & TS_COMPAT) && id != __NR_execve)) {
-#endif
-		cur_g_syscall_table = g_syscall_ia32_table;
-		socketcall_syscall = __NR_ia32_socketcall;
-		compat = true;
+	event_data.event_info.syscall_data.id = syscall_get_nr(current, regs);
+	if(event_data.event_info.syscall_data.id < 0)
+	{
+		return;
 	}
+
+	event_data.category = PPMC_SYSCALL;
+	event_data.event_info.syscall_data.regs = regs;
+	event_data.extract_socketcall_params = false;
+	event_data.compat = false;
+
+	if (kmod_in_ia32_syscall())
+	{
+#if defined(CONFIG_X86_64) && defined(CONFIG_IA32_EMULATION)
+		event_data.compat = true;
+		if (event_data.event_info.syscall_data.id == __NR_ia32_socketcall)
+		{
+			socketcall_syscall_id = __NR_ia32_socketcall;
+		}
+		else
+		{
+			/*
+			 * When a process does execve from 64bit to 32bit, TS_COMPAT is marked true
+			 * but the id of the syscall is __NR_execve, so to correctly parse it we need to
+			 * use 64bit syscall table. On 32bit __NR_execve is equal to __NR_ia32_oldolduname
+			 * which is a very old syscall, not used anymore by most applications
+			 */
+#ifdef __NR_execveat
+			if (event_data.event_info.syscall_data.id != __NR_execve && event_data.event_info.syscall_data.id != __NR_execveat)
+#else
+			if (event_data.event_info.syscall_data.id != __NR_execve)
 #endif
+			{
+				event_data.event_info.syscall_data.id =
+					g_ia32_64_map[event_data.event_info.syscall_data.id];
+				if(event_data.event_info.syscall_data.id == -1)
+				{
+					return;
+				}
+			}
+		}
+#else
+		// Unsupported arch
+		return;
+#endif
+	}
+	else
+	{
+#ifdef __NR_socketcall
+		socketcall_syscall_id = __NR_socketcall;
+#endif
+	}
 
 	g_n_tracepoint_hit_inc();
 
-	table_index = id - SYSCALL_TABLE_ID0;
-	if (likely(table_index >= 0 && table_index < SYSCALL_TABLE_SIZE)) {
-		struct event_data_t event_data;
-		int used = cur_g_syscall_table[table_index].flags & UF_USED;
-		enum syscall_flags drop_flags = cur_g_syscall_table[table_index].flags;
-		ppm_event_code type;
+	if(event_data.event_info.syscall_data.id == socketcall_syscall_id)
+	{
+		if (manage_socketcall(&event_data, socketcall_syscall_id, true) == NULL)
+		{
+			return;
+		}
+	}
 
-#ifdef _HAS_SOCKETCALL
-		if (id == socketcall_syscall) {
-			used = true;
-			drop_flags = UF_NEVER_DROP;
-			type = PPME_GENERIC_X;
-		} else
-			type = cur_g_syscall_table[table_index].exit_event_type;
-#else
-		type = cur_g_syscall_table[table_index].exit_event_type;
-#endif
+	table_index = event_data.event_info.syscall_data.id - SYSCALL_TABLE_ID0;
+	if (unlikely(table_index < 0 || table_index >= SYSCALL_TABLE_SIZE))
+	{
+		return;
+	}
+
+	event_pair = &g_syscall_table[table_index];
 
 #if defined(CAPTURE_SCHED_PROC_FORK) || defined(CAPTURE_SCHED_PROC_EXEC)
-		if(kmod_drop_syscall_exit_events(ret, type))
-			return;
+	if(kmod_drop_syscall_exit_events(ret, event_pair->exit_event_type))
+		return;
 #endif
 
-		event_data.category = PPMC_SYSCALL;
-		event_data.event_info.syscall_data.regs = regs;
-		event_data.event_info.syscall_data.id = id;
-		event_data.event_info.syscall_data.cur_g_syscall_table = cur_g_syscall_table;
-		event_data.socketcall_syscall = socketcall_syscall;
-		event_data.compat = compat;
-
-		if (used)
-			record_event_all_consumers(type, drop_flags, &event_data, KMOD_PROG_SYS_EXIT);
-		else
-			record_event_all_consumers(PPME_GENERIC_X, UF_ALWAYS_DROP, &event_data, KMOD_PROG_SYS_EXIT);
-	}
+	if (event_pair->flags & UF_USED)
+		record_event_all_consumers(event_pair->exit_event_type, event_pair->flags, &event_data, KMOD_PROG_SYS_EXIT);
+	else
+		record_event_all_consumers(PPME_GENERIC_X, UF_ALWAYS_DROP, &event_data, KMOD_PROG_SYS_EXIT);
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 1)
@@ -2581,6 +2604,8 @@ static void reset_ring_buffer(struct ppm_ring_buffer_context *ring)
 	ring->info->n_drops_buffer_dir_file_exit = 0;
 	ring->info->n_drops_buffer_other_interest_enter = 0;
 	ring->info->n_drops_buffer_other_interest_exit = 0;
+	ring->info->n_drops_buffer_close_exit = 0;
+	ring->info->n_drops_buffer_proc_exit = 0;
 	ring->info->n_drops_pf = 0;
 	ring->info->n_preemptions = 0;
 	ring->info->n_context_switches = 0;
@@ -2693,7 +2718,7 @@ static int get_tracepoint_handles(void)
 #endif
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#ifdef HAS_DEVNODE_ARG1_CONST
 static char *ppm_devnode(const struct device *dev, umode_t *mode)
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0)
@@ -2701,7 +2726,7 @@ static char *ppm_devnode(struct device *dev, umode_t *mode)
 #else
 static char *ppm_devnode(struct device *dev, mode_t *mode)
 #endif /* LINUX_VERSION_CODE > KERNEL_VERSION(3, 3, 0) */
-#endif /* LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0) */
+#endif /* LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20) */
 {
 	if (mode) {
 		*mode = 0400;
@@ -2839,7 +2864,11 @@ int scap_init(void)
 		goto init_module_err;
 	}
 
+#ifndef HAS_CLASS_CREATE_1
 	g_ppm_class = class_create(THIS_MODULE, DRIVER_DEVICE_NAME);
+#else
+	g_ppm_class = class_create(DRIVER_DEVICE_NAME);
+#endif
 	if (IS_ERR(g_ppm_class)) {
 		pr_err("can't allocate device class\n");
 		ret = -EFAULT;

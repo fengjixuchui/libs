@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
 Copyright (C) 2023 The Falco Authors.
 
@@ -14,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include "ppm_codes.h"
+#include <libsinsp/filter/ppm_codes.h>
 
 /**
  * NOTE: the following code has been ported from Falco and updated with the
@@ -235,10 +236,16 @@ libsinsp::filter::ast::ppm_sc_codes(const libsinsp::filter::ast::expr* e)
         libsinsp::events::set<ppm_sc_code>,
         libsinsp::events::all_sc_set,
         libsinsp::events::event_names_to_sc_set> v;
+// note(jasondellaluce): ppm_sc code mappings are available for linux only so far
+#ifdef __linux__
     e->accept(&v);
+#else
+    v.m_last_node_codes = { };
+#endif
     return v.m_last_node_codes;
 }
 
+// todo(jasondellaluce): should we deal with PPME_ASYNCEVENT_E at this level?
 libsinsp::events::set<ppm_event_code>
 libsinsp::filter::ast::ppm_event_codes(const libsinsp::filter::ast::expr* e)
 {

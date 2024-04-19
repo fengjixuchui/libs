@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Copyright (C) 2023 The Falco Authors.
  *
@@ -15,25 +16,25 @@ int BPF_PROG(semget_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SEMGET_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SEMGET_E_SIZE, PPME_SYSCALL_SEMGET_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_SEMGET_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: key (type: PT_INT32) */
-	s32 key = (s32)extract__syscall_argument(regs, 0);
+	int32_t key = (int32_t)extract__syscall_argument(regs, 0);
 	ringbuf__store_s32(&ringbuf, key);
 
 	/* Parameter 2: nsems (type: PT_INT32) */
-	s32 nsems = (s32)extract__syscall_argument(regs, 1);
+	int32_t nsems = (int32_t)extract__syscall_argument(regs, 1);
 	ringbuf__store_s32(&ringbuf, nsems);
 
 	/* Parameter 3: semflg (type: PT_FLAGS32) */
-	u32 semflg = (u32)extract__syscall_argument(regs, 2);
+	uint32_t semflg = (uint32_t)extract__syscall_argument(regs, 2);
 	ringbuf__store_u32(&ringbuf, semget_flags_to_scap(semflg));
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
@@ -49,17 +50,17 @@ int BPF_PROG(semget_x,
 	     long ret)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, SEMGET_X_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, SEMGET_X_SIZE, PPME_SYSCALL_SEMGET_X))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SYSCALL_SEMGET_X);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
 	/* Parameter 1: res (type: PT_ERRNO) */
-	ringbuf__store_s64(&ringbuf, (s64)ret);
+	ringbuf__store_s64(&ringbuf, (int64_t)ret);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

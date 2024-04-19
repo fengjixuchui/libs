@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
 Copyright (C) 2023 The Falco Authors.
 
@@ -16,7 +17,7 @@ limitations under the License.
 */
 
 #include <gtest/gtest.h>
-#include <sinsp.h>
+#include <libsinsp/sinsp.h>
 #include "../test_utils.h"
 
 TEST(interesting_syscalls, io_sc_set)
@@ -161,7 +162,6 @@ TEST(interesting_syscalls, event_set_to_sc_set_generic_events)
 	/* Random checks for some generic sc events. */
 	ASSERT_TRUE(sc_set.contains(PPM_SC_PERF_EVENT_OPEN));
 	ASSERT_TRUE(sc_set.contains(PPM_SC_GETSID));
-	ASSERT_TRUE(sc_set.contains(PPM_SC_INIT_MODULE));
 	ASSERT_TRUE(sc_set.contains(PPM_SC_READLINKAT));
 }
 

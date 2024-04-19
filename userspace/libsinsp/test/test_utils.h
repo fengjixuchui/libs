@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,8 +22,36 @@ limitations under the License.
 #include <vector>
 #include <set>
 #include <unordered_set>
+#if !defined(_WIN32)
 #include <netinet/in.h>
-#include <event_stats.h>
+#endif //_WIN32
+#include <driver/event_stats.h>
+
+#define DEFAULT_IPV4_CLIENT_STRING "172.40.111.222"
+#define DEFAULT_IPV6_CLIENT_STRING "::1"
+#define DEFAULT_CLIENT_PORT_STRING "54321"
+#define DEFAULT_CLIENT_PORT 54321
+
+#define DEFAULT_IPV4_SERVER_STRING "142.251.111.147"
+#define DEFAULT_IPV6_SERVER_STRING "2001:4860:4860::8888"
+#define DEFAULT_SERVER_PORT_STRING "443"
+#define DEFAULT_SERVER_PORT 443
+
+#define DEFAULT_IPV4_FDNAME "172.40.111.222:54321->142.251.111.147:443"
+#define DEFAULT_IPV6_FDNAME "::1:54321->2001:4860:4860::8888:443"
+
+#define DEFAULT_IP_STRING_SIZE 100
+
+#if defined(__linux__)
+#include <linux/un.h>
+#else
+#if !defined(_WIN32)
+#include <sys/un.h>
+# endif //_WIN32
+#ifndef UNIX_PATH_MAX
+#define UNIX_PATH_MAX 108
+#endif
+#endif
 
 #define ASSERT_NAMES_EQ(a, b)                                                                                \
 	{                                                                                                        \
@@ -86,10 +115,14 @@ std::string to_null_delimited(std::vector<std::string> list);
 template<typename T>
 std::set<T> unordered_set_to_ordered(std::unordered_set<T> unordered_set);
 
+#if !defined(_WIN32)
 struct sockaddr_in fill_sockaddr_in(int32_t ipv4_port, const char* ipv4_string);
 struct sockaddr_in6 fill_sockaddr_in6(int32_t ipv6_port, const char* ipv6_string);
+struct sockaddr_un fill_sockaddr_un(const char* unix_path);
 std::vector<uint8_t> pack_sockaddr(sockaddr *sa);
 std::vector<uint8_t> pack_socktuple(sockaddr *src, sockaddr *dest);
+std::vector<uint8_t> pack_unix_socktuple(uint64_t scr_pointer, uint64_t dst_pointer, std::string unix_path);
+#endif //_WIN32
 
 void print_bytes(uint8_t *buf, size_t size);
 

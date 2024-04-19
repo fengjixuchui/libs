@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2022 The Falco Authors.
+ * Copyright (C) 2023 The Falco Authors.
  *
  * This file is dual licensed under either the MIT or GPL 2. See MIT.txt
  * or GPL2.txt for full copies of the license.
@@ -16,12 +17,12 @@ int BPF_PROG(getsockopt_e,
 	     long id)
 {
 	struct ringbuf_struct ringbuf;
-	if(!ringbuf__reserve_space(&ringbuf, ctx, GETSOCKOPT_E_SIZE))
+	if(!ringbuf__reserve_space(&ringbuf, ctx, GETSOCKOPT_E_SIZE, PPME_SOCKET_GETSOCKOPT_E))
 	{
 		return 0;
 	}
 
-	ringbuf__store_event_header(&ringbuf, PPME_SOCKET_GETSOCKOPT_E);
+	ringbuf__store_event_header(&ringbuf);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 
@@ -61,8 +62,8 @@ int BPF_PROG(getsockopt_x,
 	auxmap__store_s64_param(auxmap, ret);
 
 	/* Parameter 2: fd (type: PT_FD) */
-	s32 fd = (s32)args[0];
-	auxmap__store_s64_param(auxmap, (s64)fd);
+	int32_t fd = (int32_t)args[0];
+	auxmap__store_s64_param(auxmap, (int64_t)fd);
 
 	/* Parameter 3: level (type: PT_ENUMFLAGS8) */
 	int level = args[1];
@@ -84,7 +85,7 @@ int BPF_PROG(getsockopt_x,
 	auxmap__store_sockopt_param(auxmap, level, optname, optlen, optval);
 
 	/* Parameter 6: optlen (type: PT_UINT32) */
-	auxmap__store_u32_param(auxmap, (u32)optlen);
+	auxmap__store_u32_param(auxmap, (uint32_t)optlen);
 
 	/*=============================== COLLECT PARAMETERS  ===========================*/
 

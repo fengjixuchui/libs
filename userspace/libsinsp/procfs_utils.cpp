@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,8 +15,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-#include "procfs_utils.h"
-#include "logger.h"
+#include <libsinsp/procfs_utils.h>
+#include <libsinsp/logger.h>
 
 #include <cstring>
 #include <sstream>
@@ -47,25 +48,6 @@ int libsinsp::procfs_utils::get_userns_root_uid(std::istream& uid_map)
 }
 
 
-std::string libsinsp::procfs_utils::get_systemd_cgroup(std::istream& cgroups)
-{
-	std::string cgroups_line;
-
-	while(std::getline(cgroups, cgroups_line))
-	{
-		size_t cgpos = cgroups_line.find(":name=systemd:");
-		if(cgpos == std::string::npos)
-		{
-			continue;
-		}
-
-		std::string systemd_cgroup = cgroups_line.substr(cgpos + strlen(":name=systemd:"), std::string::npos);
-		return systemd_cgroup;
-	}
-
-	return "";
-}
-
 //
 // ns_helper
 //
@@ -75,7 +57,7 @@ libsinsp::procfs_utils::ns_helper::ns_helper(const std::string& host_root):
 	struct stat rootlink;
 	if(-1 == stat((m_host_root + "/proc/1/root").c_str(), &rootlink))
 	{
-		g_logger.format(sinsp_logger::SEV_WARNING,
+		libsinsp_logger()->format(sinsp_logger::SEV_WARNING,
 				"Cannot read host init process proc root: %d", errno);
 		m_cannot_read_host_init_ns_mnt = true;
 	}
@@ -95,7 +77,7 @@ bool libsinsp::procfs_utils::ns_helper::in_own_ns_mnt(int64_t pid) const
 	struct stat rootlink;
 	if(-1 == stat(get_pid_root(pid).c_str(), &rootlink))
 	{
-		g_logger.format(sinsp_logger::SEV_DEBUG,
+		libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 				"Cannot read process proc root");
 		return false;
 	}
@@ -108,4 +90,3 @@ bool libsinsp::procfs_utils::ns_helper::in_own_ns_mnt(int64_t pid) const
 
 	return true;
 }
-

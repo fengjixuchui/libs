@@ -1,3 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright (C) 2023 The Falco Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations under the License.
+#
+
 option(USE_BUNDLED_PROTOBUF "Enable building of the bundled protobuf" ${USE_BUNDLED_DEPS})
 
 if(PROTOBUF_INCLUDE)
@@ -37,7 +51,7 @@ else()
 			URL_HASH "SHA256=51cec99f108b83422b7af1170afd7aeb2dd77d2bcbb7b6bad1f92509e9ccf8cb"
 			# TODO what if using system zlib?
 			CONFIGURE_COMMAND CPPFLAGS=-I${ZLIB_INCLUDE} LDFLAGS=-L${ZLIB_SRC} ./configure --with-zlib ${PROTOBUF_CONFIGURE_FLAGS} --prefix=${PROTOBUF_INSTALL_DIR}
-			BUILD_COMMAND ${CMD_MAKE}
+			BUILD_COMMAND make
 			BUILD_IN_SOURCE 1
 			BUILD_BYPRODUCTS ${PROTOC} ${PROTOBUF_INCLUDE} ${PROTOBUF_LIB}
 			INSTALL_COMMAND make install)

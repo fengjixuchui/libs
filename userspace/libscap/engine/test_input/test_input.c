@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,11 +32,12 @@ typedef struct test_input_engine test_input_engine;
 
 #define SCAP_HANDLE_T struct test_input_engine
 
-#include "noop.h"
+#include <libscap/engine/noop/noop.h>
 
-#include "scap.h"
-#include "scap-int.h"
-#include "strlcpy.h"
+#include <libscap/scap.h>
+#include <libscap/scap-int.h>
+#include <libscap/scap_proc_util.h>
+#include <libscap/strl.h>
 
 static struct test_input_engine* alloc_handle(scap_t* main_handle, char* lasterr_ptr)
 {
@@ -50,52 +52,22 @@ static struct test_input_engine* alloc_handle(scap_t* main_handle, char* lasterr
 	return engine;
 }
 
-static int32_t next(struct scap_engine_handle handle, scap_evt** pevent, uint16_t* pcpuid)
+static int32_t next(struct scap_engine_handle handle, scap_evt** pevent, uint16_t* pdevid, uint32_t* pflags)
 {
 	test_input_engine *engine = handle.m_handle;
 	scap_test_input_data *data = engine->m_data;
 
 	if (!data->events || data->event_count == 0)
 	{
-		return SCAP_EOF;
+		return SCAP_TIMEOUT;
 	}
 
 	*pevent = *(data->events++);
 	data->event_count--;
-	/* All the events are sent by CPU 1 */
-	*pcpuid = 1; 
+	/* All the events are sent by device 1 */
+	*pdevid = 1;
+	*pflags = 0;
 	return SCAP_SUCCESS;
-}
-
-
-static int32_t get_threadinfos(struct scap_engine_handle handle, uint64_t *n, const scap_threadinfo **tinfos)
-{
-	test_input_engine *engine = handle.m_handle;
-	scap_test_input_data *data = engine->m_data;
-
-	*tinfos = data->threads;
-	*n = data->thread_count;
-
-	return SCAP_SUCCESS;
-}
-
-static int32_t get_fdinfos(struct scap_engine_handle handle, const scap_threadinfo *tinfo, uint64_t *n, const scap_fdinfo **fdinfos)
-{
-	test_input_engine *engine = handle.m_handle;
-	scap_test_input_data *data = engine->m_data;
-	size_t i;
-
-	for (i = 0; i < data->thread_count; i++)
-	{
-		if(data->threads[i].tid == tinfo->tid) {
-			*fdinfos = data->fdinfo_data[i].fdinfos;
-			*n = data->fdinfo_data[i].fdinfo_count;
-			return SCAP_SUCCESS;
-		}
-	}
-
-	snprintf(engine->m_lasterr, SCAP_LASTERR_SIZE, "Could not find thread info for tid %lu", tinfo->tid);
-	return SCAP_FAILURE;
 }
 
 static int32_t init(scap_t* main_handle, scap_open_args* oargs)
@@ -114,7 +86,6 @@ static int32_t init(scap_t* main_handle, scap_open_args* oargs)
 
 const struct scap_vtable scap_test_input_engine = {
 	.name = TEST_INPUT_ENGINE,
-	.mode = SCAP_MODE_TEST,
 	.savefile_ops = NULL,
 
 	.alloc_handle = alloc_handle,
@@ -130,12 +101,6 @@ const struct scap_vtable scap_test_input_engine = {
 	.get_n_tracepoint_hit = noop_get_n_tracepoint_hit,
 	.get_n_devs = noop_get_n_devs,
 	.get_max_buf_used = noop_get_max_buf_used,
-	.get_threadlist = noop_get_threadlist,
-	.get_threadinfos = get_threadinfos,
-	.get_fdinfos = get_fdinfos,
-	.get_vpid = noop_get_vxid,
-	.get_vtid = noop_get_vxid,
-	.getpid_global = noop_getpid_global,
 	.get_api_version = NULL,
 	.get_schema_version = NULL,
 };

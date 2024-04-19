@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,9 +16,9 @@ limitations under the License.
 
 */
 
-#include "logger.h"
+#include <libsinsp/logger.h>
 
-#include "container_engine/container_cache_interface.h"
+#include <libsinsp/container_engine/container_cache_interface.h>
 
 namespace libsinsp
 {
@@ -63,7 +64,7 @@ bool container_async_source<key_type>::lookup_sync(const key_type& key, sinsp_co
 
 	if(!parse(key, value))
 	{
-		g_logger.format(sinsp_logger::SEV_DEBUG,
+		libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 				"%s (%s): Failed to get metadata, returning successful=false",
 				name(),
 				value.m_id.c_str());
@@ -77,7 +78,7 @@ bool container_async_source<key_type>::lookup_sync(const key_type& key, sinsp_co
 template<typename key_type>
 void container_async_source<key_type>::source_callback(const key_type& key, const sinsp_container_info& res)
 {
-	g_logger.format(sinsp_logger::SEV_DEBUG,
+	libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 			"%s_async (%s): Source callback result=%d",
 			name(),
 			container_id(key).c_str(),
@@ -94,7 +95,7 @@ void container_async_source<key_type>::run_impl()
 
 	while(this->dequeue_next_key(key, &res))
 	{
-		g_logger.format(sinsp_logger::SEV_DEBUG,
+		libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 				"%s_async (%s): Source dequeued key attempt=%u",
 				name(),
 				container_id(key).c_str(),
@@ -108,7 +109,7 @@ void container_async_source<key_type>::run_impl()
 			// maximum number of retries have occurred.
 			if(!res.m_lookup.is_successful())
 			{
-				g_logger.format(sinsp_logger::SEV_DEBUG,
+				libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 						"%s_async (%s): Could not look up container info after %u retries",
 						name(),
 						container_id(key).c_str(),
@@ -122,7 +123,7 @@ void container_async_source<key_type>::run_impl()
 			// Make a new attempt
 			res.m_lookup.attempt_increment();
 
-			g_logger.format(sinsp_logger::SEV_DEBUG,
+			libsinsp_logger()->format(sinsp_logger::SEV_DEBUG,
 					"%s_async (%s): lookup retry no. %d",
 					name(),
 					container_id(key).c_str(),

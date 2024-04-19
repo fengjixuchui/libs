@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
 
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 This file is dual licensed under either the MIT or GPL 2. See MIT.txt
 or GPL2.txt for full copies of the license.
@@ -17,18 +18,38 @@ or GPL2.txt for full copies of the license.
 	#define ASSERT(expr)
 #endif
 
-#if !defined(UDIG) && !defined(__USE_VMLINUX__)
+#ifdef __KERNEL__
 #include <linux/mman.h>
 #include <linux/futex.h>
 #include <linux/ptrace.h>
 #include <linux/capability.h>
 #include <linux/eventpoll.h>
 #include <linux/prctl.h>
+#include <linux/splice.h>
+#ifdef __NR_finit_module
+#include <uapi/linux/module.h>
+#endif
 #include "ppm.h"
+#ifdef __NR_memfd_create
+#include <uapi/linux/memfd.h>
+#endif
 #ifdef __NR_io_uring_register
 #include <uapi/linux/io_uring.h>
 #endif
-#endif // ifndef UDIG
+#ifdef __NR_umount2
+#include <linux/fs.h>
+#endif
+#endif // ifndef __KERNEL__
+
+#ifndef __always_inline
+#define __always_inline inline
+#endif
+
+// When this file is included in userspace
+#if !defined(__KERNEL__) && !defined(__USE_VMLINUX__)
+	#include <linux/futex.h>
+	#include <linux/dqblk_xfs.h>
+#endif
 
 #define PPM_MS_MGC_MSK 0xffff0000
 #define PPM_MS_MGC_VAL 0xC0ED0000
@@ -110,19 +131,21 @@ static __always_inline uint32_t open_flags_to_scap(uint32_t flags)
 	return res;
 }
 
-static __always_inline u32 open_modes_to_scap(unsigned long flags,
+static __always_inline uint32_t open_modes_to_scap(unsigned long flags,
 					      unsigned long modes)
 {
-#ifdef UDIG
-	unsigned long flags_mask = O_CREAT | O_TMPFILE;
-#else
+// This file is used also in userspace so we cannot use `KERNEL_VERSION` macro without an ifdef
+#ifdef __KERNEL__
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)
 	unsigned long flags_mask = O_CREAT | O_TMPFILE;
 #else
 	unsigned long flags_mask = O_CREAT;
 #endif
-#endif /* UDIG */
-	u32 res = 0;
+#else
+	unsigned long flags_mask = O_CREAT | O_TMPFILE;
+#endif
+
+	uint32_t res = 0;
 
 	if ((flags & flags_mask) == 0)
 		return res;
@@ -178,9 +201,9 @@ static __always_inline u32 open_modes_to_scap(unsigned long flags,
 	return res;
 }
 
-static __always_inline u32 openat2_resolve_to_scap(unsigned long flags)
+static __always_inline uint32_t openat2_resolve_to_scap(unsigned long flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 #ifdef RESOLVE_NO_XDEV
 	if (flags & RESOLVE_NO_XDEV)
 		res |= PPM_RESOLVE_NO_XDEV;
@@ -213,8 +236,8 @@ static __always_inline u32 openat2_resolve_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 io_uring_setup_flags_to_scap(unsigned long flags){
-	u32 res = 0;
+static __always_inline uint32_t io_uring_setup_flags_to_scap(unsigned long flags){
+	uint32_t res = 0;
 
 #ifdef IORING_SETUP_IOPOLL
 	if (flags & IORING_SETUP_IOPOLL)
@@ -258,8 +281,8 @@ static __always_inline u32 io_uring_setup_flags_to_scap(unsigned long flags){
 	return res;
 }
 
-static __always_inline u32 io_uring_setup_feats_to_scap(unsigned long flags){
-	u32 res = 0;
+static __always_inline uint32_t io_uring_setup_feats_to_scap(unsigned long flags){
+	uint32_t res = 0;
 
 #ifdef IORING_FEAT_SINGLE_MMAP
 	if (flags & IORING_FEAT_SINGLE_MMAP)
@@ -319,9 +342,9 @@ static __always_inline u32 io_uring_setup_feats_to_scap(unsigned long flags){
 	return res;
 }
 
-static __always_inline u32 io_uring_enter_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t io_uring_enter_flags_to_scap(unsigned long flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 #ifdef IORING_ENTER_GETEVENTS
 	if (flags & IORING_ENTER_GETEVENTS)
@@ -345,7 +368,7 @@ static __always_inline u32 io_uring_enter_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 io_uring_register_opcodes_to_scap(unsigned long flags)
+static __always_inline uint32_t io_uring_register_opcodes_to_scap(unsigned long flags)
 {
 	/*
 	 * io_uring_register opcodes are defined via enum in io_uring.h.
@@ -364,9 +387,9 @@ static __always_inline u32 io_uring_register_opcodes_to_scap(unsigned long flags
  *  #define IN_CLOEXEC O_CLOEXEC
  *  #define IN_NONBLOCK O_NONBLOCK
  */
-static __always_inline u16 inotify_init1_flags_to_scap(int32_t flags)
+static __always_inline uint16_t inotify_init1_flags_to_scap(int32_t flags)
 {
-	u16 res = 0;
+	uint16_t res = 0;
 
 	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
 	if(flags < 0)
@@ -395,9 +418,9 @@ static __always_inline u16 inotify_init1_flags_to_scap(int32_t flags)
  *  #define EFD_CLOEXEC O_CLOEXEC
  *  #define EFD_NONBLOCK O_NONBLOCK
  */
-static __always_inline u16 eventfd2_flags_to_scap(int32_t flags)
+static __always_inline uint16_t eventfd2_flags_to_scap(int32_t flags)
 {
-	u16 res = 0;
+	uint16_t res = 0;
 
 	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
 	if(flags < 0)
@@ -425,9 +448,9 @@ static __always_inline u16 eventfd2_flags_to_scap(int32_t flags)
  *  #define SFD_CLOEXEC O_CLOEXEC
  *  #define SFD_NONBLOCK O_NONBLOCK
  */
-static __always_inline u16 signalfd4_flags_to_scap(int32_t flags)
+static __always_inline uint16_t signalfd4_flags_to_scap(int32_t flags)
 {
-	u16 res = 0;
+	uint16_t res = 0;
 
 	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
 	if(flags < 0)
@@ -448,9 +471,9 @@ static __always_inline u16 signalfd4_flags_to_scap(int32_t flags)
 	return res;
 }
 
-static __always_inline u32 clone_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t clone_flags_to_scap(int flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	if (flags & CLONE_FILES)
 		res |= PPM_CL_CLONE_FILES;
@@ -542,7 +565,7 @@ static __always_inline u32 clone_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u8 socket_family_to_scap(u8 family)
+static __always_inline uint8_t socket_family_to_scap(uint8_t family)
 {
 	if (family == AF_INET)
 		return PPM_AF_INET;
@@ -700,9 +723,9 @@ static __always_inline u8 socket_family_to_scap(u8 family)
 	}
 }
 
-static __always_inline u32 prot_flags_to_scap(int prot)
+static __always_inline uint32_t prot_flags_to_scap(int prot)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	if (prot & PROT_READ)
 		res |= PPM_PROT_READ;
@@ -732,9 +755,9 @@ static __always_inline u32 prot_flags_to_scap(int prot)
 	return res;
 }
 
-static __always_inline u32 mmap_flags_to_scap(int flags)
+static __always_inline uint32_t mmap_flags_to_scap(int flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	if (flags & MAP_SHARED)
 		res |= PPM_MAP_SHARED;
@@ -790,7 +813,7 @@ static __always_inline u32 mmap_flags_to_scap(int flags)
 	return res;
 }
 
-static __always_inline u8 fcntl_cmd_to_scap(unsigned long cmd)
+static __always_inline uint8_t fcntl_cmd_to_scap(unsigned long cmd)
 {
 	switch (cmd) {
 	case F_DUPFD:
@@ -817,8 +840,8 @@ static __always_inline u8 fcntl_cmd_to_scap(unsigned long cmd)
 		return PPM_FCNTL_F_SETSIG;
 	case F_GETSIG:
 		return PPM_FCNTL_F_GETSIG;
-#ifndef UDIG
-#ifndef CONFIG_64BIT
+// In userspace we don't want to include these flags to avoid duplicate values.
+#if !defined(CONFIG_64BIT) && (defined(__KERNEL__) || defined(__USE_VMLINUX__))
 	case F_GETLK64:
 		return PPM_FCNTL_F_GETLK64;
 	case F_SETLK64:
@@ -826,7 +849,6 @@ static __always_inline u8 fcntl_cmd_to_scap(unsigned long cmd)
 	case F_SETLKW64:
 		return PPM_FCNTL_F_SETLKW64;
 #endif
-#endif /* UDIG */
 #ifdef F_SETOWN_EX
 	case F_SETOWN_EX:
 		return PPM_FCNTL_F_SETOWN_EX;
@@ -868,13 +890,12 @@ static __always_inline u8 fcntl_cmd_to_scap(unsigned long cmd)
 		return PPM_FCNTL_F_OFD_SETLKW;
 #endif
 	default:
-		ASSERT(false);
 		return PPM_FCNTL_UNKNOWN;
 	}
 }
 
 
-static __always_inline u8 sockopt_level_to_scap(int level)
+static __always_inline uint8_t sockopt_level_to_scap(int level)
 {
 	switch (level) {
 		case SOL_SOCKET:
@@ -889,7 +910,7 @@ static __always_inline u8 sockopt_level_to_scap(int level)
 	}
 }
 
-static __always_inline u8 sockopt_optname_to_scap(int level, int optname)
+static __always_inline uint8_t sockopt_optname_to_scap(int level, int optname)
 {
 	if (level != SOL_SOCKET)
 	{
@@ -1155,9 +1176,9 @@ static __always_inline u8 sockopt_optname_to_scap(int level, int optname)
 }
 
 /* XXX this is very basic for the moment, we'll need to improve it */
-static __always_inline u16 poll_events_to_scap(short revents)
+static __always_inline uint16_t poll_events_to_scap(short revents)
 {
-	u16 res = 0;
+	uint16_t res = 0;
 
 	if (revents & POLLIN)
 		res |= PPM_POLLIN;
@@ -1195,10 +1216,9 @@ static __always_inline u16 poll_events_to_scap(short revents)
 	return res;
 }
 
-static __always_inline u16 futex_op_to_scap(unsigned long op)
+static __always_inline uint16_t futex_op_to_scap(unsigned long op)
 {
-	u16 res = 0;
-#ifndef UDIG
+	uint16_t res = 0;
 	unsigned long flt_op = op & 127;
 
 	if (flt_op == FUTEX_WAIT)
@@ -1243,30 +1263,29 @@ static __always_inline u16 futex_op_to_scap(unsigned long op)
 	if (op & FUTEX_CLOCK_REALTIME)
 		res |= PPM_FU_FUTEX_CLOCK_REALTIME;
 #endif
-#endif /* UDIG */
 	return res;
 }
 
-static __always_inline u32 access_flags_to_scap(unsigned flags)
+static __always_inline uint32_t access_flags_to_scap(unsigned flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	if (flags == 0/*F_OK*/) {
 		res = PPM_F_OK;
 	} else {
-#ifdef UDIG
-		if (flags & X_OK)
-			res |= PPM_X_OK;
-		if (flags & R_OK)
-			res |= PPM_R_OK;
-		if (flags & W_OK)
-			res |= PPM_W_OK;
-#else
+#if defined(__KERNEL__) || defined(__USE_VMLINUX__)
 		if (flags & MAY_EXEC)
 			res |= PPM_X_OK;
 		if (flags & MAY_READ)
 			res |= PPM_R_OK;
 		if (flags & MAY_WRITE)
+			res |= PPM_W_OK;
+#else // in userspace
+		if (flags & X_OK)
+			res |= PPM_X_OK;
+		if (flags & R_OK)
+			res |= PPM_R_OK;
+		if (flags & W_OK)
 			res |= PPM_W_OK;
 #endif
 	}
@@ -1274,9 +1293,9 @@ static __always_inline u32 access_flags_to_scap(unsigned flags)
 	return res;
 }
 
-static __always_inline u8 rlimit_resource_to_scap(unsigned long rresource)
+static __always_inline u8 rlimit_resource_to_scap(uint32_t resource)
 {
-	switch (rresource) {
+	switch (resource) {
 	case RLIMIT_CPU:
 		return PPM_RLIMIT_CPU;
 	case RLIMIT_FSIZE:
@@ -1316,19 +1335,15 @@ static __always_inline u8 rlimit_resource_to_scap(unsigned long rresource)
 	}
 }
 
-static __always_inline u16 shutdown_how_to_scap(unsigned long how)
+static __always_inline uint16_t shutdown_how_to_scap(unsigned long how)
 {
-#ifdef SHUT_RD
 	if (how == SHUT_RD)
 		return PPM_SHUT_RD;
 	else if (how == SHUT_WR)
-		return SHUT_WR;
+		return PPM_SHUT_WR;
 	else if (how == SHUT_RDWR)
-		return SHUT_RDWR;
-
-	ASSERT(false);
-#endif
-	return (u16)how;
+		return PPM_SHUT_RDWR;
+	return PPM_SHUT_UNKNOWN;
 }
 
 static __always_inline uint64_t lseek_whence_to_scap(unsigned long whence)
@@ -1345,9 +1360,9 @@ static __always_inline uint64_t lseek_whence_to_scap(unsigned long whence)
 	return res;
 }
 
-static __always_inline u16 semop_flags_to_scap(short flags)
+static __always_inline uint16_t semop_flags_to_scap(short flags)
 {
-	u16 res = 0;
+	uint16_t res = 0;
 
 	if (flags & IPC_NOWAIT)
 		res |= PPM_IPC_NOWAIT;
@@ -1358,9 +1373,9 @@ static __always_inline u16 semop_flags_to_scap(short flags)
 	return res;
 }
 
-static __always_inline u32 pf_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t pf_flags_to_scap(unsigned long flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	/* Page fault error codes don't seem to be clearly defined in header
 	 * files throughout the kernel except in some emulation modes (e.g. kvm)
@@ -1392,9 +1407,9 @@ static __always_inline u32 pf_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 flock_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t flock_flags_to_scap(int flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	if (flags & LOCK_EX)
 		res |= PPM_LOCK_EX;
@@ -1454,7 +1469,6 @@ static __always_inline uint16_t quotactl_cmd_to_scap(unsigned long cmd)
 	/*
 	 *  XFS specific
 	 */
-#ifndef UDIG
 	case Q_XQUOTAON:
 		res = PPM_Q_XQUOTAON;
 		break;
@@ -1476,7 +1490,6 @@ static __always_inline uint16_t quotactl_cmd_to_scap(unsigned long cmd)
 	case Q_XQUOTASYNC:
 		res = PPM_Q_XQUOTASYNC;
 		break;
-#endif		
 	default:
 		res = 0;
 	}
@@ -1499,9 +1512,9 @@ static __always_inline uint8_t quotactl_fmt_to_scap(unsigned long fmt)
 	}
 }
 
-static __always_inline u32 semget_flags_to_scap(unsigned flags)
+static __always_inline uint32_t semget_flags_to_scap(unsigned flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	if (flags & IPC_CREAT)
 		res |= PPM_IPC_CREAT;
@@ -1512,7 +1525,7 @@ static __always_inline u32 semget_flags_to_scap(unsigned flags)
 	return res;
 }
 
-static __always_inline u32 semctl_cmd_to_scap(unsigned cmd)
+static __always_inline uint32_t semctl_cmd_to_scap(unsigned cmd)
 {
 	switch (cmd) {
 	case IPC_STAT: return PPM_IPC_STAT;
@@ -1536,7 +1549,7 @@ static __always_inline u32 semctl_cmd_to_scap(unsigned cmd)
 	return 0;
 }
 
-static __always_inline u16 ptrace_requests_to_scap(unsigned long req)
+static __always_inline uint16_t ptrace_requests_to_scap(unsigned long req)
 {
 	switch (req) {
 #ifdef PTRACE_SINGLEBLOCK
@@ -1667,9 +1680,9 @@ static __always_inline u16 ptrace_requests_to_scap(unsigned long req)
 	}
 }
 
-static __always_inline u32 execveat_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t execveat_flags_to_scap(unsigned long flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 #ifdef AT_EMPTY_PATH
 	if (flags & AT_EMPTY_PATH)
@@ -1684,7 +1697,7 @@ static __always_inline u32 execveat_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 fsconfig_cmds_to_scap(u32 cmd)
+static __always_inline uint32_t fsconfig_cmds_to_scap(uint32_t cmd)
 {
 	/*
 	 * fsconfig opcodes are defined via enum in uapi/linux/mount.h.
@@ -1696,9 +1709,9 @@ static __always_inline u32 fsconfig_cmds_to_scap(u32 cmd)
 	return cmd;
 }
 
-static __always_inline u32 mlockall_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t mlockall_flags_to_scap(unsigned long flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 #ifdef MCL_CURRENT
 	if (flags & MCL_CURRENT)
 		res |= PPM_MLOCKALL_MCL_CURRENT;
@@ -1714,9 +1727,9 @@ static __always_inline u32 mlockall_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 mlock2_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t mlock2_flags_to_scap(unsigned long flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 #ifdef MLOCK_ONFAULT
 	if (flags & MLOCK_ONFAULT)
 		res |= PPM_MLOCK_ONFAULT;
@@ -1724,9 +1737,24 @@ static __always_inline u32 mlock2_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 unlinkat_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t memfd_create_flags_to_scap(uint32_t flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
+#ifdef MFD_CLOEXEC
+		if(flags & MFD_CLOEXEC) res |= PPM_MFD_CLOEXEC;
+#endif
+#ifdef MFD_ALLOW_SEALING
+		if(flags & MFD_ALLOW_SEALING) res |= PPM_MFD_ALLOW_SEALING;
+#endif
+#ifdef MFD_HUGETLB
+		if(flags & MFD_HUGETLB) res |= PPM_MFD_HUGETLB;
+#endif
+return res;
+}
+
+static __always_inline uint32_t unlinkat_flags_to_scap(int32_t flags)
+{
+	uint32_t res = 0;
 
 	if (flags & AT_REMOVEDIR)
 		res |= PPM_AT_REMOVEDIR;
@@ -1734,9 +1762,9 @@ static __always_inline u32 unlinkat_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 linkat_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t linkat_flags_to_scap(int32_t flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	if (flags & AT_SYMLINK_FOLLOW)
 		res |= PPM_AT_SYMLINK_FOLLOW;
@@ -1749,9 +1777,30 @@ static __always_inline u32 linkat_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 chmod_mode_to_scap(unsigned long modes)
+static __always_inline uint32_t newfstatat_flags_to_scap(int32_t flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
+
+	/* AT_SYMLINK_NOFOLLOW was introduced in kernel 2.6.16, we don't need to check if it's defined */ 
+	if (flags & AT_SYMLINK_NOFOLLOW)
+		res |= PPM_AT_SYMLINK_NOFOLLOW;
+
+#ifdef AT_EMPTY_PATH
+	if (flags & AT_EMPTY_PATH)
+		res |= PPM_AT_EMPTY_PATH;
+#endif
+
+#ifdef AT_NO_AUTOMOUNT
+	if (flags & AT_NO_AUTOMOUNT)
+		res |= PPM_AT_NO_AUTOMOUNT;
+#endif
+
+	return res;
+}
+
+static __always_inline uint32_t chmod_mode_to_scap(unsigned long modes)
+{
+	uint32_t res = 0;
 	if (modes & S_IRUSR)
 		res |= PPM_S_IRUSR;
 
@@ -1803,9 +1852,32 @@ static __always_inline u32 chmod_mode_to_scap(unsigned long modes)
 	return res;
 }
 
-static __always_inline u32 fchownat_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t umount2_flags_to_scap(int flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
+
+#ifdef MNT_FORCE
+	if (flags & MNT_FORCE)
+		res |= PPM_MNT_FORCE;
+#endif
+#ifdef MNT_DETACH
+	if (flags & MNT_DETACH)
+		res |= PPM_MNT_DETACH;
+#endif
+#ifdef MNT_EXPIRE
+	if (flags & MNT_EXPIRE)
+		res |= PPM_MNT_EXPIRE;
+#endif
+#ifdef UMOUNT_NOFOLLOW
+	if (flags & UMOUNT_NOFOLLOW)
+		res |= PPM_UMOUNT_NOFOLLOW;
+#endif
+	return res;
+}
+
+static __always_inline uint32_t fchownat_flags_to_scap(unsigned long flags)
+{
+	uint32_t res = 0;
 
 #ifdef AT_SYMLINK_FOLLOW
 	if (flags & AT_SYMLINK_FOLLOW)
@@ -1820,9 +1892,9 @@ static __always_inline u32 fchownat_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u64 capabilities_to_scap(unsigned long caps)
+static __always_inline uint64_t capabilities_to_scap(unsigned long caps)
 {
-	u64 res = 0;
+	uint64_t res = 0;
 	
 #ifdef CAP_CHOWN
 	if(caps & (1UL << CAP_CHOWN))
@@ -1992,9 +2064,9 @@ static __always_inline u64 capabilities_to_scap(unsigned long caps)
 	return res;
 }
 
-static __always_inline u32 dup3_flags_to_scap(unsigned long flags)
+static __always_inline uint32_t dup3_flags_to_scap(int flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 #ifdef O_CLOEXEC
 	if (flags & O_CLOEXEC)
 		res |= PPM_O_CLOEXEC;
@@ -2002,9 +2074,9 @@ static __always_inline u32 dup3_flags_to_scap(unsigned long flags)
 	return res;
 }
 
-static __always_inline u32 pipe2_flags_to_scap(int32_t flags)
+static __always_inline uint32_t pipe2_flags_to_scap(int32_t flags)
 {
-	u32 res = 0;
+	uint32_t res = 0;
 
 	/* We need to explicitly handle the negative case otherwise `-1` will match all `flags & ...` */
 	if(flags < 0)
@@ -2059,15 +2131,117 @@ static __always_inline uint32_t splice_flags_to_scap(uint32_t flags)
 	return res;
 }
 
+static __always_inline uint32_t pidfd_open_flags_to_scap(uint32_t flags)
+{
+	uint32_t res = 0;
+// See https://elixir.bootlin.com/linux/v5.10.185/source/include/uapi/linux/pidfd.h#L10
+#ifdef O_NONBLOCK
+	if(flags & O_NONBLOCK) res |= PPM_PIDFD_NONBLOCK;
+#endif
+	return res;
+}
+
 #ifdef OVERLAYFS_SUPER_MAGIC
 #define PPM_OVERLAYFS_SUPER_MAGIC OVERLAYFS_SUPER_MAGIC
 #else
 #define PPM_OVERLAYFS_SUPER_MAGIC 0x794c7630
 #endif
 
-static __always_inline u32 prctl_options_to_scap(int options)
+static __always_inline uint32_t prctl_options_to_scap(int options)
 {
-	return (u32)options;
+	return (uint32_t)options;
+}
+
+static __always_inline uint32_t finit_module_flags_to_scap(int32_t flags)
+{
+	int32_t res = 0;
+#ifdef MODULE_INIT_IGNORE_MODVERSIONS
+	if(flags & MODULE_INIT_IGNORE_MODVERSIONS)
+		res |= PPM_MODULE_INIT_IGNORE_MODVERSIONS;
+#endif
+
+#ifdef MODULE_INIT_IGNORE_VERMAGIC
+	if(flags & MODULE_INIT_IGNORE_VERMAGIC)
+		res |= PPM_MODULE_INIT_IGNORE_VERMAGIC;
+#endif
+
+#ifdef MODULE_INIT_COMPRESSED_FILE
+	if(flags & MODULE_INIT_COMPRESSED_FILE)
+		res |= PPM_MODULE_INIT_COMPRESSED_FILE;
+#endif
+
+	return res;
+}
+
+static __always_inline uint32_t mknod_mode_to_scap(uint32_t modes)
+{
+	uint32_t res = chmod_mode_to_scap(modes);
+
+	/*
+	 * mknod modes
+	 */
+
+#ifdef S_IFMT
+	switch(modes & S_IFMT){
+#ifdef S_IFSOCK
+		case S_IFSOCK:
+			res |= PPM_S_IFSOCK;
+			break;
+#endif
+#ifdef S_IFREG
+		// Zero file type is equivalent to type S_IFREG.
+		case 0:
+		case S_IFREG:
+			res |= PPM_S_IFREG;
+			break;
+#endif
+#ifdef S_IFBLK
+		case S_IFBLK:
+			res |= PPM_S_IFBLK;
+			break;
+#endif
+#ifdef S_IFCHR
+		case S_IFCHR:
+			res |= PPM_S_IFCHR;
+			break;
+#endif
+#ifdef S_IFIFO
+		case S_IFIFO:
+			res |= PPM_S_IFIFO;
+			break;
+#endif
+		default:
+			break;
+	}
+#endif
+
+	return res;
+}
+
+static __always_inline uint32_t bpf_cmd_to_scap (unsigned long cmd){
+	/*
+	 * bpf opcodes are defined via enum in uapi/linux/bpf.h.
+	 * It is userspace API (thus stable) and arch-independent.
+	 * Therefore we map them 1:1; if any unmapped flag arrives,
+	 * we will just print its value to userspace without mapping it to a string flag.
+	 * We then need to append new flags to both flags_table and ppm_events_public PPM_ flags.
+	 */
+
+	return cmd;
+}
+
+static __always_inline uint32_t delete_module_flags_to_scap(unsigned long flags)
+{
+	uint32_t res = 0;
+#ifdef O_NONBLOCK
+	if (flags & O_NONBLOCK)
+		res |= PPM_DELETE_MODULE_O_NONBLOCK;
+#endif
+#ifdef O_TRUNC
+	if (flags & O_TRUNC)
+		res |= PPM_DELETE_MODULE_O_TRUNC;
+#endif
+	return res;
 }
 
 #endif /* PPM_FLAG_HELPERS_H_ */
